@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import os
@@ -10,6 +10,7 @@ from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_DASHBOARD_URL = "https://botmaster-l17d.onrender.com"
 
 
 def write_status(
@@ -81,30 +82,39 @@ def _write_sqlite(payload: dict[str, Any]) -> None:
         return
 
 
-def _dashboard_endpoint() -> str | None:
+def _endpoint_from_base_url(base_url: str) -> str:
+    base_url = base_url.strip().rstrip("/")
+    if base_url.endswith("/api/ingest"):
+        return base_url
+    return f"{base_url}/api/ingest"
+
+
+def _dashboard_endpoint() -> str:
     endpoint = os.getenv("BOTMASTER_STATUS_ENDPOINT")
     if endpoint:
-        return endpoint.rstrip("/")
+        return _endpoint_from_base_url(endpoint)
+
+    dashboard_url = os.getenv("BOTMASTER_DASHBOARD_URL") or os.getenv("DASHBOARD_PUBLIC_URL")
+    if dashboard_url:
+        return _endpoint_from_base_url(dashboard_url)
+
     hostport = os.getenv("BOTMASTER_STATUS_HOSTPORT")
     if hostport:
         hostport = hostport.strip().rstrip("/")
         if hostport.startswith("http://") or hostport.startswith("https://"):
-            return f"{hostport}/api/ingest"
+            return _endpoint_from_base_url(hostport)
         return f"http://{hostport}/api/ingest"
-    public_url = os.getenv("DASHBOARD_PUBLIC_URL")
-    if public_url:
-        return f"{public_url.rstrip('/')}/api/ingest"
-    return None
+
+    return _endpoint_from_base_url(DEFAULT_DASHBOARD_URL)
 
 
 def _post_dashboard(payload: dict[str, Any]) -> None:
-    endpoint = _dashboard_endpoint()
     token = os.getenv("BOTMASTER_STATUS_TOKEN")
-    if not endpoint or not token:
+    if not token:
         return
     body = json.dumps(payload, ensure_ascii=True, default=str).encode("utf-8")
     request = Request(
-        endpoint,
+        _dashboard_endpoint(),
         data=body,
         method="POST",
         headers={
@@ -113,7 +123,7 @@ def _post_dashboard(payload: dict[str, Any]) -> None:
         },
     )
     try:
-        with urlopen(request, timeout=5):
+        with urlopen(request, timeout=8):
             return
     except (OSError, URLError):
         return

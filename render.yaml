@@ -34,6 +34,8 @@ services:
         value: 3.12.0
       - key: BOT_ID
         value: yield
+      - key: BOTMASTER_DASHBOARD_URL
+        value: https://botmaster-l17d.onrender.com
       - key: BOTMASTER_STATUS_HOSTPORT
         fromService:
           type: web
@@ -59,6 +61,8 @@ services:
         value: 3.12.0
       - key: BOT_ID
         value: domain
+      - key: BOTMASTER_DASHBOARD_URL
+        value: https://botmaster-l17d.onrender.com
       - key: BOTMASTER_STATUS_HOSTPORT
         fromService:
           type: web
@@ -84,6 +88,8 @@ services:
         value: 3.12.0
       - key: BOT_ID
         value: asset
+      - key: BOTMASTER_DASHBOARD_URL
+        value: https://botmaster-l17d.onrender.com
       - key: BOTMASTER_STATUS_HOSTPORT
         fromService:
           type: web
@@ -109,6 +115,8 @@ services:
         value: 3.12.0
       - key: BOT_ID
         value: trend
+      - key: BOTMASTER_DASHBOARD_URL
+        value: https://botmaster-l17d.onrender.com
       - key: BOTMASTER_STATUS_HOSTPORT
         fromService:
           type: web
@@ -121,3 +129,4 @@ services:
           envVarKey: BOTMASTER_STATUS_TOKEN
       - key: PAPER_MODE
         value: "true"
+

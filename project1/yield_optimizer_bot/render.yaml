@@ -10,9 +10,12 @@ services:
         value: 3.12.0
       - key: BOT_ID
         value: yield
+      - key: BOTMASTER_DASHBOARD_URL
+        value: https://botmaster-l17d.onrender.com
       - key: BOTMASTER_STATUS_TOKEN
         sync: false
       - key: BOTMASTER_STATUS_ENDPOINT
         sync: false
       - key: PAPER_MODE
         value: "true"
+

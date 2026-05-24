@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 BOTMASTER_ROOT = Path(__file__).resolve().parent
+DEFAULT_DASHBOARD_URL = "https://botmaster-l17d.onrender.com"
 
 
 @dataclass(frozen=True)
@@ -36,6 +37,7 @@ def run_bot(spec: BotSpec) -> None:
     os.chdir(bot_dir)
     os.environ.setdefault("BOT_ID", spec.bot_id)
     os.environ.setdefault("PYTHONUNBUFFERED", "1")
+    os.environ.setdefault("BOTMASTER_DASHBOARD_URL", DEFAULT_DASHBOARD_URL)
     sys.path.insert(0, str(bot_dir))
     sys.argv = ["python -m app.main", "scheduler"]
 
@@ -73,6 +75,7 @@ def stop_processes(processes: list[mp.Process], timeout_seconds: float = 20.0) -
 
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s [runner] %(message)s")
+    os.environ.setdefault("BOTMASTER_DASHBOARD_URL", DEFAULT_DASHBOARD_URL)
     context = mp.get_context("spawn")
     processes = start_processes(context)
     stopping = False
