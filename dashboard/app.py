@@ -105,26 +105,26 @@ def dashboard():
     return render_template("dashboard.html", snapshot=snapshot)
 
 
-@app.route("/api/status")
+@app.get("/api/status")
 def api_status():
-    if not _is_authenticated():
-        return jsonify({"error": "unauthorized"}), 401
     return jsonify(build_snapshot())
 
 
-@app.route("/api/ingest", methods=["POST"])
+@app.post("/api/ingest")
 def api_ingest():
     token = os.getenv("BOTMASTER_STATUS_TOKEN")
     supplied = request.headers.get("X-BotMaster-Token", "")
     if not token or not hmac.compare_digest(supplied, token):
         return jsonify({"error": "unauthorized"}), 401
 
-    payload = request.get_json(silent=True) or {}
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "invalid json payload"}), 400
     try:
         _write_shared_status(payload)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
-    return jsonify({"ok": True})
+    return jsonify({"ok": True, "bot_id": payload.get("bot_id")})
 
 
 def _is_authenticated() -> bool:
@@ -728,4 +728,5 @@ def json_script(value: Any) -> str:
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "5000"))
     app.run(host="0.0.0.0", port=port)
+
 
