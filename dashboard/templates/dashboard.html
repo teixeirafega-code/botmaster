@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BotMaster Dashboard</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #070a11;
+      --panel: #101827;
+      --panel-soft: #141f32;
+      --line: rgba(148, 163, 184, .18);
+      --text: #e5e7eb;
+      --muted: #94a3b8;
+      --green: #22c55e;
+      --blue: #38bdf8;
+      --amber: #f59e0b;
+      --purple: #a78bfa;
+      --red: #ef4444;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .shell {
+      width: min(1320px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 28px 0 40px;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding-bottom: 22px;
+      border-bottom: 1px solid var(--line);
+    }
+    h1 {
+      margin: 0 0 4px;
+      font-size: 28px;
+      letter-spacing: 0;
+    }
+    .subtle { color: var(--muted); font-size: 14px; }
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+    .summary {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin: 22px 0;
+    }
+    .pill {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 7px 12px;
+      color: var(--muted);
+      background: rgba(20, 31, 50, .68);
+      font-size: 13px;
+    }
+    .logout {
+      border: 1px solid var(--line);
+      background: transparent;
+      color: var(--text);
+      height: 36px;
+      border-radius: 6px;
+      padding: 0 12px;
+      cursor: pointer;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+    .card {
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(20, 31, 50, .96), rgba(16, 24, 39, .98));
+      border-radius: 8px;
+      padding: 18px;
+      min-height: 310px;
+      box-shadow: 0 18px 48px rgba(0, 0, 0, .22);
+    }
+    .card-top {
+      display: flex;
+      align-items: start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .card h2 {
+      margin: 0;
+      font-size: 19px;
+      letter-spacing: 0;
+    }
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-weight: 800;
+      border: 1px solid var(--line);
+    }
+    .status::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--red);
+    }
+    .status.running::before { background: var(--green); }
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    .metric {
+      background: rgba(7, 10, 17, .42);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      min-height: 78px;
+    }
+    .metric.wide { grid-column: 1 / -1; }
+    .metric-label {
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 8px;
+    }
+    .metric-value {
+      font-size: 21px;
+      font-weight: 800;
+      overflow-wrap: anywhere;
+    }
+    .apy-list, .detail-list {
+      display: grid;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(7, 10, 17, .35);
+    }
+    .row span:first-child {
+      color: var(--muted);
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .row strong {
+      white-space: nowrap;
+    }
+    .accent-green { border-top: 3px solid var(--green); }
+    .accent-blue { border-top: 3px solid var(--blue); }
+    .accent-amber { border-top: 3px solid var(--amber); }
+    .accent-purple { border-top: 3px solid var(--purple); }
+    @media (max-width: 860px) {
+      .grid { grid-template-columns: 1fr; }
+      header { align-items: flex-start; flex-direction: column; }
+      .header-actions { justify-content: flex-start; }
+    }
+    @media (max-width: 560px) {
+      .metric-grid { grid-template-columns: 1fr; }
+      .metric.wide { grid-column: auto; }
+      .shell { width: min(100vw - 20px, 1320px); padding-top: 18px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div>
+        <h1>BotMaster Dashboard</h1>
+        <div class="subtle">Last refresh: <span id="generated-at">{{ snapshot.generated_label }}</span></div>
+      </div>
+      <div class="header-actions">
+        <span class="pill">Auto refresh: 30s</span>
+        <span class="pill"><span id="running-count">{{ snapshot.running_count }}</span> running</span>
+        <span class="pill"><span id="stopped-count">{{ snapshot.stopped_count }}</span> stopped</span>
+        <form method="post" action="{{ url_for('logout') }}">
+          <button class="logout" type="submit">Logout</button>
+        </form>
+      </div>
+    </header>
+
+    <section class="grid" id="cards">
+      {% for card in snapshot.cards %}
+      <article class="card accent-{{ card.accent }}" data-card-id="{{ card.id }}">
+        <div class="card-top">
+          <div>
+            <h2>{{ card.name }}</h2>
+            <div class="subtle">Updated: <span data-field="last_update">{{ card.last_update }}</span></div>
+          </div>
+          <span class="status {{ 'running' if card.status == 'RUNNING' else '' }}" data-field="status">{{ card.status }}</span>
+        </div>
+        <div class="metric-grid" data-field="metrics">
+          {% for metric in card.metrics %}
+          <div class="metric {{ 'wide' if loop.index == 3 else '' }}">
+            <div class="metric-label">{{ metric.label }}</div>
+            <div class="metric-value">{{ metric.value }}</div>
+          </div>
+          {% endfor %}
+        </div>
+        {% if card.apys %}
+        <div class="apy-list" data-field="apys">
+          {% for apy in card.apys %}
+          <div class="row"><span>{{ apy.protocol }}</span><strong>{{ apy.value }}</strong></div>
+          {% endfor %}
+        </div>
+        {% endif %}
+        <div class="detail-list" data-field="details">
+          {% for detail in card.details %}
+          <div class="row"><span>{{ detail.label }}</span><strong>{{ detail.value }}</strong></div>
+          {% endfor %}
+        </div>
+      </article>
+      {% endfor %}
+    </section>
+  </main>
+
+  <script id="initial-data" type="application/json">{{ snapshot|json_script|safe }}</script>
+  <script>
+    function metricMarkup(metrics) {
+      return metrics.map(function(metric, index) {
+        var wide = index === 2 ? " wide" : "";
+        return '<div class="metric' + wide + '"><div class="metric-label">' +
+          escapeHtml(metric.label) + '</div><div class="metric-value">' +
+          escapeHtml(metric.value) + '</div></div>';
+      }).join("");
+    }
+    function rowMarkup(rows, labelKey) {
+      if (!rows) return "";
+      return rows.map(function(row) {
+        var label = row[labelKey] || row.label || "";
+        return '<div class="row"><span>' + escapeHtml(label) + '</span><strong>' +
+          escapeHtml(row.value) + '</strong></div>';
+      }).join("");
+    }
+    function escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+    function renderSnapshot(snapshot) {
+      document.getElementById("generated-at").textContent = snapshot.generated_label;
+      document.getElementById("running-count").textContent = snapshot.running_count;
+      document.getElementById("stopped-count").textContent = snapshot.stopped_count;
+      snapshot.cards.forEach(function(card) {
+        var element = document.querySelector('[data-card-id="' + card.id + '"]');
+        if (!element) return;
+        element.querySelector('[data-field="last_update"]').textContent = card.last_update;
+        var status = element.querySelector('[data-field="status"]');
+        status.textContent = card.status;
+        status.classList.toggle("running", card.status === "RUNNING");
+        element.querySelector('[data-field="metrics"]').innerHTML = metricMarkup(card.metrics);
+        var apys = element.querySelector('[data-field="apys"]');
+        if (apys) apys.innerHTML = rowMarkup(card.apys || [], "protocol");
+        element.querySelector('[data-field="details"]').innerHTML = rowMarkup(card.details || [], "label");
+      });
+    }
+    async function refresh() {
+      try {
+        var response = await fetch("{{ url_for('api_status') }}", {cache: "no-store"});
+        if (response.status === 401) {
+          window.location.href = "{{ url_for('login') }}";
+          return;
+        }
+        if (!response.ok) return;
+        renderSnapshot(await response.json());
+      } catch (error) {
+      }
+    }
+    setInterval(refresh, 30000);
+  </script>
+</body>
+</html>
