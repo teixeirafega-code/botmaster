@@ -1,0 +1,2 @@
+"""Automated opportunity actions."""
+

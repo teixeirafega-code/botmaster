@@ -1,0 +1,31 @@
+{
+  "analytics": {
+    "avoided_bad_trades": 0,
+    "decision_rejections": [],
+    "hypothetical_pnl_usd": -3.5,
+    "last_yield_accrual_ts": 1779518324.32912,
+    "protocol_rank_history": [],
+    "realized_simulated_yield_usd": 0.0,
+    "rebalance_count": 1,
+    "simulated_gas_spent_usd": 2.5,
+    "simulated_slippage_spent_usd": 1.0
+  },
+  "current_protocol": "aave",
+  "last_rebalance_ts": 1779518324.3300948,
+  "pending_operation_id": null,
+  "protocol_positions": {
+    "aave": {
+      "USDC": {
+        "amount_wei": 500000,
+        "asset_symbol": "USDC",
+        "avg_entry_apy": 0.08,
+        "opened_at": 1779518324.3300948,
+        "protocol": "aave",
+        "updated_at": 1779518324.3300948
+      }
+    }
+  },
+  "wallet_balances": {
+    "USDC": 500000
+  }
+}

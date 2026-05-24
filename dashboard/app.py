@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import csv
 import hmac
@@ -112,6 +112,21 @@ def api_status():
     return jsonify(build_snapshot())
 
 
+@app.route("/api/ingest", methods=["POST"])
+def api_ingest():
+    token = os.getenv("BOTMASTER_STATUS_TOKEN")
+    supplied = request.headers.get("X-BotMaster-Token", "")
+    if not token or not hmac.compare_digest(supplied, token):
+        return jsonify({"error": "unauthorized"}), 401
+
+    payload = request.get_json(silent=True) or {}
+    try:
+        _write_shared_status(payload)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"ok": True})
+
+
 def _is_authenticated() -> bool:
     return session.get("authenticated") is True
 
@@ -125,6 +140,7 @@ def build_snapshot() -> dict[str, Any]:
         _asset_card(process_lines, now),
         _trend_card(process_lines, now),
     ]
+    cards = _merge_shared_statuses(cards, _read_shared_statuses(), now)
     running = sum(1 for card in cards if card["status"] == "RUNNING")
     return {
         "generated_at": now.isoformat(),
@@ -567,6 +583,143 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+
+def _shared_db_path() -> Path:
+    raw = os.getenv("BOTMASTER_SHARED_DB")
+    if raw:
+        path = Path(raw)
+        return path if path.is_absolute() else BASE_DIR / path
+    return BASE_DIR / "data" / "botmaster_status.sqlite"
+
+
+def _ensure_shared_status_schema(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS bot_status (
+            bot_id TEXT PRIMARY KEY,
+            bot_name TEXT NOT NULL,
+            status TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            metrics_json TEXT NOT NULL,
+            error TEXT
+        )
+        """
+    )
+
+
+def _write_shared_status(payload: dict[str, Any]) -> None:
+    bot_id = str(payload.get("bot_id") or "").strip()
+    bot_name = str(payload.get("bot_name") or bot_id).strip()
+    status = str(payload.get("status") or "STOPPED").strip().upper()
+    updated_at = str(payload.get("updated_at") or _now().isoformat())
+    metrics = payload.get("metrics") if isinstance(payload.get("metrics"), dict) else {}
+    error = payload.get("error")
+    if bot_id not in BOT_CONFIG:
+        raise ValueError("unknown bot_id")
+    db_path = _shared_db_path()
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(db_path, timeout=10) as connection:
+        connection.execute("PRAGMA journal_mode=WAL")
+        _ensure_shared_status_schema(connection)
+        connection.execute(
+            """
+            INSERT INTO bot_status (bot_id, bot_name, status, updated_at, metrics_json, error)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(bot_id) DO UPDATE SET
+                bot_name=excluded.bot_name,
+                status=excluded.status,
+                updated_at=excluded.updated_at,
+                metrics_json=excluded.metrics_json,
+                error=excluded.error
+            """,
+            (bot_id, bot_name, status, updated_at, json.dumps(metrics, ensure_ascii=True, default=str), error),
+        )
+
+
+def _read_shared_statuses() -> dict[str, dict[str, Any]]:
+    db_path = _shared_db_path()
+    if not db_path.exists():
+        return {}
+    try:
+        with sqlite3.connect(db_path, timeout=5) as connection:
+            connection.row_factory = sqlite3.Row
+            rows = connection.execute(
+                "SELECT bot_id, bot_name, status, updated_at, metrics_json, error FROM bot_status"
+            ).fetchall()
+    except sqlite3.Error:
+        return {}
+    result: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        result[str(row["bot_id"])] = {
+            "bot_name": row["bot_name"],
+            "status": row["status"],
+            "updated_at": row["updated_at"],
+            "updated_at_dt": _parse_dt(row["updated_at"]),
+            "metrics": _json_loads(row["metrics_json"], {}),
+            "error": row["error"],
+        }
+    return result
+
+
+def _merge_shared_statuses(
+    cards: list[dict[str, Any]],
+    shared: dict[str, dict[str, Any]],
+    now: datetime,
+) -> list[dict[str, Any]]:
+    for card in cards:
+        status = shared.get(str(card.get("id")))
+        if not status:
+            continue
+        updated_at = status.get("updated_at_dt")
+        is_fresh = bool(updated_at and (now - updated_at.astimezone(timezone.utc)) <= timedelta(minutes=10))
+        card["status"] = str(status.get("status") or "STOPPED").upper() if is_fresh else "STOPPED"
+        if updated_at:
+            card["last_update"] = _format_dt(updated_at)
+        metrics = status.get("metrics") if isinstance(status.get("metrics"), dict) else {}
+        _apply_shared_metrics(card, metrics)
+        if status.get("error"):
+            details = card.setdefault("details", [])
+            details.insert(0, {"label": "Last error", "value": str(status["error"])[:140]})
+    return cards
+
+
+def _apply_shared_metrics(card: dict[str, Any], metrics: dict[str, Any]) -> None:
+    bot_id = str(card.get("id"))
+    if bot_id == "yield":
+        apys = metrics.get("apys")
+        if isinstance(apys, dict):
+            for item in card.get("apys", []):
+                key = str(item.get("protocol", "")).lower()
+                item["value"] = _format_percent(_safe_float(apys.get(key)))
+        if metrics.get("best_protocol"):
+            _replace_metric(card, "Best protocol", _title(str(metrics.get("best_protocol"))))
+        _replace_metric(card, "Simulated profit", _format_money(_safe_float(metrics.get("simulated_profit"))))
+    elif bot_id == "domain":
+        _replace_metric(card, "Domains scanned today", _format_int(_safe_float(metrics.get("domains_scanned_today"))))
+        _replace_metric(card, "Opportunities found", _format_int(_safe_float(metrics.get("opportunities_found"))))
+        if metrics.get("last_domain_registered"):
+            _replace_metric(card, "Last domain registered", str(metrics.get("last_domain_registered")))
+    elif bot_id == "asset":
+        _replace_metric(card, "Assets scanned", _format_int(_safe_float(metrics.get("assets_scanned"))))
+        _replace_metric(card, "Opportunities found", _format_int(_safe_float(metrics.get("opportunities_found"))))
+        _replace_metric(card, "Total potential profit", _format_money(_safe_float(metrics.get("total_potential_profit"))))
+    elif bot_id == "trend":
+        _replace_metric(card, "Trends detected today", _format_int(_safe_float(metrics.get("trends_detected_today"))))
+        topics = metrics.get("top_topics")
+        if isinstance(topics, list):
+            card["details"] = [
+                {"label": str(topic.get("name", "Unknown trend")), "value": _format_score(topic.get("score"))}
+                for topic in topics[:5]
+                if isinstance(topic, dict)
+            ]
+
+
+def _replace_metric(card: dict[str, Any], label: str, value: str) -> None:
+    for metric in card.get("metrics", []):
+        if metric.get("label") == label:
+            metric["value"] = value
+            return
+    card.setdefault("metrics", []).append({"label": label, "value": value})
 @app.template_filter("json_script")
 def json_script(value: Any) -> str:
     return json.dumps(value, ensure_ascii=True).replace("</", "<\\/")
@@ -575,3 +728,4 @@ def json_script(value: Any) -> str:
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "5000"))
     app.run(host="0.0.0.0", port=port)
+

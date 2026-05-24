@@ -1,0 +1,59 @@
+app:
+  paper_mode: true
+  scan_interval_minutes: 30
+  log_level: INFO
+  log_dir: logs
+  state_path: data/assets_state.json
+  stats_path: data/profit_stats.json
+  max_listing_age_days: 14
+
+marketplaces:
+  flippa:
+    enabled: true
+    urls: ["https://flippa.com/search?filter[property_type][]=website&filter[status][]=open"]
+    cookie_env: FLIPPA_COOKIE
+    request:
+      timeout_seconds: 25
+      min_delay_seconds: 2.0
+  empireflippers:
+    enabled: true
+    urls: ["https://api.empireflippers.com/api/v1/listings/list?listing_status=For%20Sale"]
+    cookie_env: EMPIREFLIPPERS_COOKIE
+    request:
+      timeout_seconds: 25
+      min_delay_seconds: 2.0
+  acquirecom:
+    enabled: true
+    urls: ["https://app.acquire.com/startups"]
+    cookie_env: ACQUIRECOM_COOKIE
+    request:
+      timeout_seconds: 25
+      min_delay_seconds: 2.0
+
+valuation:
+  multipliers:
+    website: [30, 40]
+    app: [24, 36]
+    youtube: [24, 30]
+    ecommerce: [24, 36]
+    saas: [36, 60]
+    newsletter: [20, 35]
+    other: [20, 30]
+
+scoring:
+  undervalued_threshold: 0.5
+  min_score_alert: 70
+  niche_bonus:
+    saas: 10
+    software: 10
+    ai: 8
+    finance: 8
+    b2b: 7
+    education: 5
+
+notifications:
+  telegram:
+    enabled: false
+    bot_token: ""
+    chat_id: ""
+    timeout_seconds: 12

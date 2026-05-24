@@ -1,0 +1,135 @@
+app:
+  name: Trend Hunter Bot
+  environment: production
+  paper_mode: true
+  cycle_interval_minutes: 30
+  trend_score_threshold: 70
+  state_db_path: trend_hunter.db
+  log_file: logs/trend_hunter.log
+  log_level: INFO
+
+monitors:
+  google_trends:
+    enabled: true
+    pn: united_states
+    geo: US
+    hl: en-US
+    tz: 360
+    timeframe: now 7-d
+    max_results: 25
+    timeout_seconds: 20
+
+  reddit:
+    enabled: true
+    subreddits:
+      - technology
+      - business
+      - startups
+      - marketing
+      - worldnews
+      - artificial
+      - entrepreneur
+    max_posts_per_subreddit: 25
+    min_score: 25
+    user_agent: TrendHunterBot/1.0
+
+  twitter:
+    enabled: true
+    queries:
+      - launch OR launches
+      - breakthrough OR emerging
+      - AI startup OR new app
+      - viral product OR trending product
+      - new tool OR new software
+    max_results_per_query: 50
+    min_engagement: 20
+    since_hours: 12
+    nitter_instances:
+      - https://nitter.net
+      - https://nitter.poast.org
+
+  tiktok:
+    enabled: true
+    hashtags:
+      - tech
+      - aitools
+      - smallbusiness
+      - sidehustle
+      - startups
+    max_videos_per_hashtag: 30
+    max_trending_videos: 50
+    request_timeout_seconds: 15
+
+scoring:
+  weights:
+    growth_velocity: 0.35
+    search_volume: 0.25
+    social_engagement: 0.25
+    commercial_potential: 0.15
+  max_growth_velocity: 250
+  max_search_volume: 100
+  max_social_engagement: 10000
+  platform_boost_per_extra_platform: 5
+  max_platform_boost: 12
+  commercial_keywords:
+    - buy
+    - deal
+    - discount
+    - review
+    - software
+    - tool
+    - app
+    - course
+    - template
+    - agency
+    - ai
+    - crypto
+    - fitness
+    - finance
+    - travel
+    - business
+    - startup
+    - jobs
+    - shop
+  emerging_keywords:
+    - new
+    - launch
+    - beta
+    - viral
+    - breaking
+    - trend
+    - fastest
+    - rising
+    - exploding
+
+domains:
+  enabled: true
+  tlds:
+    - com
+    - io
+    - ai
+    - co
+  max_candidates_per_trend: 6
+  register_max_per_trend: 1
+  godaddy_base_url: https://api.godaddy.com
+  period_years: 1
+  privacy: true
+  auto_renew: false
+  social_platforms:
+    - x
+    - tiktok
+    - instagram
+    - youtube
+
+telegram:
+  enabled: true
+  timeout_seconds: 15
+
+content:
+  max_ideas: 8
+  audience: early adopters, niche publishers, affiliate marketers, and founders
+  channels:
+    - blog
+    - short_video
+    - newsletter
+    - social_thread

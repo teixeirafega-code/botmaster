@@ -1,0 +1,2 @@
+"""Asset Flip Bot package."""
+

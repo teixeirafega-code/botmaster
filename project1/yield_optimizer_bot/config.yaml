@@ -1,0 +1,77 @@
+﻿app:
+  mode: paper_trading  # paper_trading | production
+  emergency_stop_file: "app/data/emergency_stop.flag"
+  dry_run: true
+  execute_transactions: false
+  sign_transactions: false
+  paper_trading: true
+  paper:
+    enabled: true
+    state_file: "app/data/paper_state.json"
+    execution_journal_file: "app/data/paper_execution_journal.json"
+    initial_holdings:
+      USDC: 140000000
+      USDT: 0
+    accrue_yield_on_heartbeat: true
+
+networks:
+  ethereum:
+    chain_id: 1
+    name: "Ethereum"
+    rpc_urls:
+      - "https://mainnet.infura.io/v3/YOUR_KEY" 
+  polygon:
+    chain_id: 137
+    name: "Polygon"
+    rpc_urls:
+      - "https://polygon.publicnode.com"
+      - "https://polygon.api.onfinality.io/public"
+      - "https://tenderly.rpc.polygon.community"
+
+wallet:
+  address: "0xd22fbbB6B3fD4a5370714b4D9357033d59c0db14"
+
+assets:
+  stablecoins:
+    - USDC
+    - USDT
+
+protocols:
+  enabled:
+    - aave
+    - compound
+    - curve
+    - beefy
+    - stargate
+  min_apy_diff_bps: 50  # keep churn low for small capital; only react to material APY gaps
+
+execution:
+  gas:
+    max_gas_volatility_bps: 300  # if gas jumps too much, skip
+    max_gwei: 250                 # hard ceiling
+    priority_fee_gwei: 1.5        # default priority fee (EIP-1559)
+    gas_limit_buffer: 1.15        # safety multiplier
+  slippage:
+    bps: 5                          # 0.05%; more realistic for 140 USDC in stablecoin pools
+  cooldown_seconds: 3888000        # 45 days; enough to amortize a paper rebalance on small capital
+  min_profit_usd: 0.10             # require at least ten cents of expected paper profit
+
+scheduler:
+  timezone: "UTC"
+  monitor_interval_seconds: 60
+  rebalance_interval_seconds: 300
+  healthcheck_interval_seconds: 120
+  heartbeat_interval_seconds: 30
+
+risk:
+  rate_limit_per_minute: 120
+  max_consecutive_failures: 10
+
+apy:
+  cache_ttl_seconds: 20
+  timeout_seconds: 10
+
+# Note: This template does not include concrete contract addresses/ABIs for Aave/Compound/Curve.
+# Update protocol modules with production-ready contract config for each chain.
+
+

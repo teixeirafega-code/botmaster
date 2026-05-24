@@ -1,0 +1,25 @@
+{
+  "4f6bdea1-f209-496c-9cb1-75416e043bc4": {
+    "created_at": 1779518324.2139945,
+    "error": null,
+    "idempotency_key": "idem-1",
+    "metadata": {
+      "asset_symbol": "USDC"
+    },
+    "nonce": 9,
+    "operation_id": "4f6bdea1-f209-496c-9cb1-75416e043bc4",
+    "operation_type": "rebalance",
+    "receipts": [
+      {
+        "simulated": true,
+        "status": 1
+      }
+    ],
+    "status": "started",
+    "steps": [],
+    "tx_hashes": [
+      "0xabc"
+    ],
+    "updated_at": 1779518324.214971
+  }
+}

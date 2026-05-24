@@ -1,0 +1,123 @@
+services:
+  - type: web
+    name: botmaster-dashboard
+    runtime: python
+    plan: starter
+    rootDir: dashboard
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT
+    disk:
+      name: botmaster-dashboard-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.0
+      - key: BOTMASTER_SHARED_DB
+        value: /var/data/botmaster_status.sqlite
+      - key: DASHBOARD_PASSWORD
+        sync: false
+      - key: BOTMASTER_STATUS_TOKEN
+        sync: false
+      - key: FLASK_SECRET_KEY
+        generateValue: true
+
+  - type: worker
+    name: botmaster-yield-optimizer
+    runtime: python
+    plan: starter
+    rootDir: project1/yield_optimizer_bot
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: python -m app.main scheduler
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.0
+      - key: BOT_ID
+        value: yield
+      - key: BOTMASTER_STATUS_HOSTPORT
+        fromService:
+          type: web
+          name: botmaster-dashboard
+          property: hostport
+      - key: BOTMASTER_STATUS_TOKEN
+        fromService:
+          type: web
+          name: botmaster-dashboard
+          envVarKey: BOTMASTER_STATUS_TOKEN
+      - key: PAPER_MODE
+        value: "true"
+
+  - type: worker
+    name: botmaster-domain-hunter
+    runtime: python
+    plan: starter
+    rootDir: project2/projeto2
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: python -m app.main scheduler
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.0
+      - key: BOT_ID
+        value: domain
+      - key: BOTMASTER_STATUS_HOSTPORT
+        fromService:
+          type: web
+          name: botmaster-dashboard
+          property: hostport
+      - key: BOTMASTER_STATUS_TOKEN
+        fromService:
+          type: web
+          name: botmaster-dashboard
+          envVarKey: BOTMASTER_STATUS_TOKEN
+      - key: PAPER_MODE
+        value: "true"
+
+  - type: worker
+    name: botmaster-asset-flip
+    runtime: python
+    plan: starter
+    rootDir: project3/asset_flip_bot
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: python -m app.main scheduler
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.0
+      - key: BOT_ID
+        value: asset
+      - key: BOTMASTER_STATUS_HOSTPORT
+        fromService:
+          type: web
+          name: botmaster-dashboard
+          property: hostport
+      - key: BOTMASTER_STATUS_TOKEN
+        fromService:
+          type: web
+          name: botmaster-dashboard
+          envVarKey: BOTMASTER_STATUS_TOKEN
+      - key: PAPER_MODE
+        value: "true"
+
+  - type: worker
+    name: botmaster-trend-hunter
+    runtime: python
+    plan: starter
+    rootDir: project4/trend_hunter_bot
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: python -m app.main scheduler
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.0
+      - key: BOT_ID
+        value: trend
+      - key: BOTMASTER_STATUS_HOSTPORT
+        fromService:
+          type: web
+          name: botmaster-dashboard
+          property: hostport
+      - key: BOTMASTER_STATUS_TOKEN
+        fromService:
+          type: web
+          name: botmaster-dashboard
+          envVarKey: BOTMASTER_STATUS_TOKEN
+      - key: PAPER_MODE
+        value: "true"

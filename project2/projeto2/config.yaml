@@ -1,0 +1,62 @@
+scraper:
+  whoisxml_url: "https://newly-registered-domains.whoisxmlapi.com/"
+  whoisxml_download_urls: []
+  whoisxml_download_limit: 3
+  expireddomains_url: "https://www.expireddomains.net/deleted-domains/"
+  expireddomains_max_pages: 3
+  user_agent: "DomainHunterBot/1.0"
+  user_agents:
+    - "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36"
+    - "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15"
+    - "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36"
+  timeout_seconds: 30
+scoring:
+  registration_threshold: 60
+  max_domains_per_cycle: 100
+  extension_points:
+    .com: 10
+    .net: 7
+    .org: 5
+    .io: 4
+pricing:
+  score_60_70: 200
+  score_70_80: 500
+  score_80_90: 1500
+  score_90_100: 5000
+economics:
+  minimum_expected_roi: 2.0
+  minimum_time_adjusted_roi: 0.25
+  minimum_resale_probability: 0.18
+  minimum_purchase_confidence: 0.45
+  max_portfolio_capital: 1000.0
+  max_extension_concentration: 0.65
+  max_niche_concentration: 0.45
+scheduler:
+  interval_minutes: 30
+  timezone: "America/Sao_Paulo"
+  cycle_timeout_seconds: 600
+  max_instances: 1
+database:
+  min_pool_size: 1
+  max_pool_size: 5
+  connect_timeout_seconds: 10
+risk:
+  max_daily_registrations: 5
+  max_capital_exposure: 250.0
+  minimum_score: 60
+  blacklist: []
+  cooldown_minutes: 60
+  emergency_stop: false
+  dry_run_audit: false
+  max_candidate_age_minutes: 120
+runtime:
+  max_concurrent_scoring: 10
+  max_concurrent_registrations: 1
+  event_handler_timeout_seconds: 10.0
+  event_dead_letter_max: 500
+  alert_cooldown_seconds: 300
+  alert_rate_limit_per_minute: 10
+  retry_budget_per_provider_per_minute: 20
+observability:
+  health_host: "0.0.0.0"
+  health_port: 8080

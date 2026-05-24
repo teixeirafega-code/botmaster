@@ -1,0 +1,8 @@
+PyYAML>=6.0.1
+python-dotenv>=1.0.1
+requests>=2.32.3
+pytrends>=4.9.2
+praw>=7.7.1
+ntscraper>=0.3.17
+python-whois>=0.9.4
+rich>=13.7.1

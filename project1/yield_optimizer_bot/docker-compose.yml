@@ -1,0 +1,14 @@
+services:
+  yield-optimizer-bot:
+    build:
+      context: .
+      dockerfile: yield_optimizer_bot/Dockerfile
+    container_name: yield-optimizer-bot
+    env_file:
+      - ./.env
+    volumes:
+      - ./yield_optimizer_bot:/app/yield_optimizer_bot
+      - ./yield_optimizer_bot/logs:/app/yield_optimizer_bot/logs
+      - ./yield_optimizer_bot/app/data:/app/yield_optimizer_bot/app/data
+    restart: unless-stopped
+

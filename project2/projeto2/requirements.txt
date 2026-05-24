@@ -1,0 +1,10 @@
+aiohttp>=3.12,<4
+APScheduler>=3.10,<4
+asyncpg>=0.31,<1
+beautifulsoup4>=4.12,<5
+pydantic>=2.12,<3
+pydantic-settings>=2.11,<3
+python-dotenv>=1.0,<2
+python-json-logger>=4,<5
+python-telegram-bot>=22,<23
+PyYAML>=6.0.3,<7

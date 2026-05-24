@@ -1,0 +1,22 @@
+{
+  "apy_history": {},
+  "current_protocol": "aave",
+  "holdings": {
+    "USDC": 500
+  },
+  "last_onchain_sync_ts": 1779518326.8501737,
+  "last_rebalance_ts": 0.0,
+  "last_seen_positions": {
+    "aave": {
+      "USDC": {
+        "allowance_wei": 500,
+        "details": {},
+        "shares_balance_wei": 400,
+        "supplied_balance_wei": 400,
+        "wallet_balance_wei": 100,
+        "withdrawable_balance_wei": 400
+      }
+    }
+  },
+  "pending_operation_id": null
+}
