@@ -39,6 +39,7 @@ app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
 )
+APP_STARTED_AT = datetime.now(timezone.utc)
 
 
 BOT_CONFIG = {
@@ -137,19 +138,22 @@ def _is_authenticated() -> bool:
 def build_snapshot() -> dict[str, Any]:
     process_lines = _process_command_lines()
     now = _now()
+    shared_statuses = _read_shared_statuses()
     cards = [
         _yield_card(process_lines, now),
         _domain_card(process_lines, now),
         _asset_card(process_lines, now),
         _trend_card(process_lines, now),
     ]
-    cards = _merge_shared_statuses(cards, _read_shared_statuses(), now)
+    cards = _merge_shared_statuses(cards, shared_statuses, now)
     running = sum(1 for card in cards if card["status"] == "RUNNING")
     return {
         "generated_at": now.isoformat(),
         "generated_label": _format_dt(now),
         "running_count": running,
         "stopped_count": len(cards) - running,
+        "summary": _build_summary(cards, now),
+        "activity_feed": _build_activity_feed(cards, shared_statuses, now),
         "cards": cards,
     }
 
@@ -157,6 +161,7 @@ def build_snapshot() -> dict[str, Any]:
 def _yield_card(process_lines: list[str], now: datetime) -> dict[str, Any]:
     root = _bot_root("yield")
     state = _read_json(root / "app/data/state.json")
+    paper_state = _read_json(root / "app/data/paper_state.json")
     log_path = root / "logs/bot.log"
     logs = _tail_lines(log_path, 900)
 
@@ -166,10 +171,13 @@ def _yield_card(process_lines: list[str], now: datetime) -> dict[str, Any]:
         key=lambda item: item[1],
         default=(None, None),
     )
-    simulated_profit = _latest_number_from_logs(
-        logs,
-        ["expected_profit_usd", "pnl_usd", "accrued_simulated_yield_usd"],
-    )
+    best_protocol_name = best_protocol[0]
+    best_apy = best_protocol[1]
+    capital_usd = _yield_capital_usd(paper_state, state)
+    estimated_monthly_profit = capital_usd * best_apy / 12 if best_apy is not None else 0.0
+    simulated_profit = _yield_simulated_profit(paper_state, logs)
+    chart_points = _yield_apy_chart_points(state, now)
+    next_rebalance = _yield_next_rebalance(root, state, paper_state, now)
 
     last_update = _latest_timestamp([root / "app/data/state.json", log_path], logs)
     return {
@@ -178,15 +186,32 @@ def _yield_card(process_lines: list[str], now: datetime) -> dict[str, Any]:
         "accent": "green",
         "status": _bot_status(root, process_lines, last_update, now),
         "last_update": _format_dt(last_update),
+        "last_update_ts": last_update.isoformat() if last_update else None,
+        "simulated_balance": capital_usd + (simulated_profit or 0.0),
+        "potential_profit": estimated_monthly_profit,
+        "opportunities_today": 0,
+        "best_protocol": _title(best_protocol_name) if best_protocol_name else "No APY data",
+        "best_apy": best_apy,
+        "best_apy_label": _format_percent(best_apy),
+        "estimated_monthly_profit": estimated_monthly_profit,
+        "estimated_monthly_profit_label": _format_money(estimated_monthly_profit),
+        "capital_label": _format_money(capital_usd),
+        "next_rebalance": next_rebalance,
+        "chart": {
+            "label": "Best APY last 24h",
+            "points": chart_points,
+        },
         "metrics": [
-            {"label": "Best protocol", "value": _title(best_protocol[0]) if best_protocol[0] else "No APY data"},
+            {"label": "Best protocol", "value": _title(best_protocol_name) if best_protocol_name else "No APY data", "tone": "good"},
+            {"label": "Monthly profit", "value": _format_money(estimated_monthly_profit), "tone": "good" if estimated_monthly_profit > 0 else "warning"},
             {"label": "Simulated profit", "value": _format_money(simulated_profit)},
+            {"label": "Next rebalance", "value": next_rebalance["label"], "tone": next_rebalance["tone"]},
         ],
         "apys": [
-            {"protocol": "Aave", "value": _format_percent(current_apys.get("aave"))},
-            {"protocol": "Compound", "value": _format_percent(current_apys.get("compound"))},
-            {"protocol": "Curve", "value": _format_percent(current_apys.get("curve"))},
-            {"protocol": "Beefy", "value": _format_percent(current_apys.get("beefy"))},
+            {"protocol": "Aave", "value": _format_percent(current_apys.get("aave")), "raw": current_apys.get("aave"), "is_best": best_protocol_name == "aave"},
+            {"protocol": "Compound", "value": _format_percent(current_apys.get("compound")), "raw": current_apys.get("compound"), "is_best": best_protocol_name == "compound"},
+            {"protocol": "Curve", "value": _format_percent(current_apys.get("curve")), "raw": current_apys.get("curve"), "is_best": best_protocol_name == "curve"},
+            {"protocol": "Beefy", "value": _format_percent(current_apys.get("beefy")), "raw": current_apys.get("beefy"), "is_best": best_protocol_name == "beefy"},
         ],
         "details": [],
     }
@@ -203,6 +228,8 @@ def _domain_card(process_lines: list[str], now: datetime) -> dict[str, Any]:
     opportunities_today = 0
     last_registered = None
     last_registered_time = None
+    top_candidates: dict[str, dict[str, Any]] = {}
+    inventory_counts = {"registered": 0, "listed": 0, "sold": 0}
 
     for row in logs:
         event = str(row.get("event_name", "")).upper()
@@ -213,14 +240,53 @@ def _domain_card(process_lines: list[str], now: datetime) -> dict[str, Any]:
             scanned_today += 1
             if score is not None and score >= 70:
                 opportunities_today += 1
+                domain_name = str(domain or "").strip()
+                if domain_name:
+                    previous = top_candidates.get(domain_name)
+                    if not previous or score > previous["score"]:
+                        top_candidates[domain_name] = {
+                            "name": domain_name,
+                            "score": score,
+                            "score_label": _format_score(score),
+                            "estimated_sale_price": _estimate_domain_sale_price(score),
+                            "estimated_sale_price_label": _format_money(_estimate_domain_sale_price(score)),
+                            "tone": _score_tone(score),
+                        }
         if domain and ("REGISTER" in event or "PURCHASE" in event):
             if last_registered_time is None or (timestamp and timestamp > last_registered_time):
                 last_registered = str(domain)
                 last_registered_time = timestamp
+        if "REGISTER" in event or "PURCHASE" in event:
+            inventory_counts["registered"] += 1
+        if "LIST" in event:
+            inventory_counts["listed"] += 1
+        if "SOLD" in event or "SALE" in event:
+            inventory_counts["sold"] += 1
 
     if scanned_today == 0 and isinstance(domains_state, list):
         scanned_today = len(domains_state)
-        opportunities_today = sum(1 for item in domains_state if _safe_float(item.get("score")) and item.get("score") >= 70)
+        for item in domains_state:
+            if not isinstance(item, dict):
+                continue
+            score = _safe_float(item.get("score"))
+            name = str(item.get("domain") or item.get("name") or "").strip()
+            status = str(item.get("status") or "").lower()
+            if status in inventory_counts:
+                inventory_counts[status] += 1
+            if score is not None and score >= 70:
+                opportunities_today += 1
+                if name:
+                    top_candidates[name] = {
+                        "name": name,
+                        "score": score,
+                        "score_label": _format_score(score),
+                        "estimated_sale_price": _estimate_domain_sale_price(score),
+                        "estimated_sale_price_label": _format_money(_estimate_domain_sale_price(score)),
+                        "tone": _score_tone(score),
+                    }
+
+    top_domains = sorted(top_candidates.values(), key=lambda item: item["score"], reverse=True)[:5]
+    portfolio_value = sum(item["estimated_sale_price"] for item in top_candidates.values())
 
     last_update = _latest_timestamp([log_path, root / "data/domains.json"], [])
     return {
@@ -229,10 +295,26 @@ def _domain_card(process_lines: list[str], now: datetime) -> dict[str, Any]:
         "accent": "blue",
         "status": _bot_status(root, process_lines, last_update, now),
         "last_update": _format_dt(last_update),
+        "last_update_ts": last_update.isoformat() if last_update else None,
+        "simulated_balance": portfolio_value,
+        "potential_profit": portfolio_value,
+        "opportunities_today": opportunities_today,
+        "top_domains": top_domains,
+        "inventory": {
+            "registered": inventory_counts["registered"],
+            "listed": inventory_counts["listed"],
+            "sold": inventory_counts["sold"],
+            "registered_label": _format_int(inventory_counts["registered"]),
+            "listed_label": _format_int(inventory_counts["listed"]),
+            "sold_label": _format_int(inventory_counts["sold"]),
+            "portfolio_value": portfolio_value,
+            "portfolio_value_label": _format_money(portfolio_value),
+        },
         "metrics": [
-            {"label": "Domains scanned today", "value": _format_int(scanned_today)},
-            {"label": "Opportunities found", "value": _format_int(opportunities_today)},
+            {"label": "Domains scanned today", "value": _format_int(scanned_today), "tone": "neutral"},
+            {"label": "Opportunities found", "value": _format_int(opportunities_today), "tone": "good" if opportunities_today else "warning"},
             {"label": "Last domain registered", "value": last_registered or "No registration in logs"},
+            {"label": "Portfolio value", "value": _format_money(portfolio_value), "tone": "good" if portfolio_value else "warning"},
         ],
         "details": [],
     }
@@ -250,28 +332,14 @@ def _asset_card(process_lines: list[str], now: datetime) -> dict[str, Any]:
     if assets_scanned is None and isinstance(state.get("latest_listings"), list):
         assets_scanned = len(state["latest_listings"])
 
-    opportunities = _first_number(stats, "opportunities_found")
-    if opportunities is None and isinstance(stats.get("opportunities"), list):
-        opportunities = len(stats["opportunities"])
+    top_opportunities = _asset_opportunities(stats)
+    opportunities = len(top_opportunities)
+    if opportunities == 0:
+        opportunities = _first_number(stats, "opportunities_found")
 
-    total_profit = _first_number(stats, "total_potential_profit")
-    if total_profit is None and isinstance(stats.get("opportunities"), list):
-        total_profit = sum(
-            _safe_float(item.get("valuation", {}).get("profit_potential")) or 0
-            for item in stats["opportunities"]
-        )
-
-    top_details = []
-    opportunities_list = stats.get("opportunities") if isinstance(stats.get("opportunities"), list) else []
-    for item in sorted(opportunities_list, key=lambda row: _safe_float(row.get("opportunity_score")) or 0, reverse=True)[:3]:
-        listing = item.get("listing", {}) if isinstance(item, dict) else {}
-        valuation = item.get("valuation", {}) if isinstance(item, dict) else {}
-        top_details.append(
-            {
-                "label": str(listing.get("name") or "Unnamed asset")[:86],
-                "value": _format_money(_safe_float(valuation.get("profit_potential"))),
-            }
-        )
+    total_profit = sum(item["profit_potential"] for item in top_opportunities)
+    if total_profit <= 0:
+        total_profit = _first_number(stats, "total_potential_profit") or 0.0
 
     last_update = _latest_timestamp([stats_path, state_path, log_path], [])
     return {
@@ -280,12 +348,21 @@ def _asset_card(process_lines: list[str], now: datetime) -> dict[str, Any]:
         "accent": "amber",
         "status": _bot_status(root, process_lines, last_update, now),
         "last_update": _format_dt(last_update),
+        "last_update_ts": last_update.isoformat() if last_update else None,
+        "simulated_balance": 0.0,
+        "potential_profit": total_profit,
+        "opportunities_today": opportunities,
+        "score_filter_min": 70,
+        "top_opportunities": top_opportunities[:12],
         "metrics": [
-            {"label": "Assets scanned", "value": _format_int(assets_scanned)},
-            {"label": "Opportunities found", "value": _format_int(opportunities)},
-            {"label": "Total potential profit", "value": _format_money(total_profit)},
+            {"label": "Assets scanned", "value": _format_int(assets_scanned), "tone": "neutral"},
+            {"label": "Opportunities found", "value": _format_int(opportunities), "tone": "good" if opportunities else "warning"},
+            {"label": "Total potential profit", "value": _format_money(total_profit), "tone": "good" if total_profit else "warning"},
         ],
-        "details": top_details,
+        "details": [
+            {"label": item["name"], "value": item["profit_label"]}
+            for item in top_opportunities[:3]
+        ],
     }
 
 
@@ -298,14 +375,21 @@ def _trend_card(process_lines: list[str], now: datetime) -> dict[str, Any]:
         trends_today, top_topics = _read_trend_logs(log_path, now)
 
     last_update = _latest_timestamp([db_path, log_path], [])
+    top_score = max((_safe_float(topic.get("score")) or 0.0 for topic in top_topics), default=0.0)
     return {
         "id": "trend",
         "name": "Trend Hunter",
         "accent": "purple",
         "status": _bot_status(root, process_lines, last_update, now),
         "last_update": _format_dt(last_update),
+        "last_update_ts": last_update.isoformat() if last_update else None,
+        "simulated_balance": 0.0,
+        "potential_profit": 0.0,
+        "opportunities_today": trends_today or 0,
+        "top_trends": [_trend_display_item(topic) for topic in top_topics[:5]],
         "metrics": [
-            {"label": "Trends detected today", "value": _format_int(trends_today)},
+            {"label": "Trends detected today", "value": _format_int(trends_today), "tone": "good" if trends_today else "warning"},
+            {"label": "Top score", "value": _format_score(top_score), "tone": _score_tone(top_score)},
         ],
         "details": [
             {"label": topic.get("name", "Unknown trend"), "value": _format_score(topic.get("score"))}
@@ -380,6 +464,223 @@ def _latest_yield_apys(state: dict[str, Any], logs: list[str]) -> dict[str, floa
     return result
 
 
+def _yield_capital_usd(paper_state: dict[str, Any], state: dict[str, Any]) -> float:
+    for source, key in ((paper_state, "wallet_balances"), (state, "holdings")):
+        balances = source.get(key)
+        if not isinstance(balances, dict):
+            continue
+        total = 0.0
+        for symbol in ("USDC", "USDT", "DAI"):
+            total += _stablecoin_units_to_usd(_safe_float(balances.get(symbol)) or 0.0)
+        if total > 0:
+            return total
+    return 140.0
+
+
+def _stablecoin_units_to_usd(value: float) -> float:
+    if value > 100_000:
+        return value / 1_000_000
+    return value
+
+
+def _yield_simulated_profit(paper_state: dict[str, Any], logs: list[str]) -> float | None:
+    analytics = paper_state.get("analytics") if isinstance(paper_state.get("analytics"), dict) else {}
+    value = _first_number(
+        analytics,
+        "hypothetical_pnl_usd",
+        "realized_simulated_yield_usd",
+        "accrued_simulated_yield_usd",
+    )
+    if value is not None:
+        return value
+    return _latest_number_from_logs(
+        logs,
+        ["expected_profit_usd", "pnl_usd", "accrued_simulated_yield_usd"],
+    )
+
+
+def _yield_apy_chart_points(state: dict[str, Any], now: datetime) -> list[dict[str, Any]]:
+    records = []
+    history = state.get("apy_history", {})
+    if isinstance(history, dict):
+        raw = history.get("USDC")
+        if isinstance(raw, list):
+            records = [item for item in raw if isinstance(item, dict)]
+
+    grouped: dict[int, dict[str, Any]] = {}
+    cutoff = now.timestamp() - 86_400
+    for record in records:
+        ts = _safe_float(record.get("ts"))
+        apy = _safe_float(record.get("apy"))
+        protocol = str(record.get("protocol") or "").lower()
+        if ts is None or apy is None or not protocol:
+            continue
+        if ts < cutoff and len(records) > 80:
+            continue
+        bucket = int(ts // 300) * 300
+        current = grouped.get(bucket)
+        if not current or apy > current["apy"]:
+            grouped[bucket] = {"ts": ts, "apy": apy, "protocol": protocol}
+
+    points = sorted(grouped.values(), key=lambda item: item["ts"])
+    if not points and records:
+        fallback = sorted(records, key=lambda item: _safe_float(item.get("ts")) or 0)[-80:]
+        for record in fallback:
+            ts = _safe_float(record.get("ts"))
+            apy = _safe_float(record.get("apy"))
+            protocol = str(record.get("protocol") or "").lower()
+            if ts is not None and apy is not None and protocol:
+                points.append({"ts": ts, "apy": apy, "protocol": protocol})
+
+    return [
+        {
+            "time": datetime.fromtimestamp(item["ts"], tz=timezone.utc).astimezone().strftime("%H:%M"),
+            "value": round(item["apy"] * 100, 4),
+            "value_label": _format_percent(item["apy"]),
+            "protocol": _title(item["protocol"]),
+        }
+        for item in points[-80:]
+    ]
+
+
+def _yield_next_rebalance(root: Path, state: dict[str, Any], paper_state: dict[str, Any], now: datetime) -> dict[str, Any]:
+    interval = _read_config_number(root / "config.yaml", "rebalance_interval_seconds", 300)
+    last_rebalance = _safe_float(state.get("last_rebalance_ts")) or _safe_float(paper_state.get("last_rebalance_ts")) or 0.0
+    if last_rebalance <= 0:
+        return {"label": "Ready now", "seconds": 0, "tone": "good"}
+    remaining = int((last_rebalance + interval) - now.timestamp())
+    if remaining <= 0:
+        return {"label": "Ready now", "seconds": 0, "tone": "good"}
+    return {"label": _human_duration(remaining), "seconds": remaining, "tone": "warning" if remaining > 600 else "good"}
+
+
+def _read_config_number(path: Path, key: str, default: int) -> int:
+    if not path.exists():
+        return default
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return default
+    match = re.search(rf"^\s*{re.escape(key)}\s*:\s*([0-9]+)", text, re.MULTILINE)
+    return int(match.group(1)) if match else default
+
+
+def _asset_opportunities(stats: dict[str, Any]) -> list[dict[str, Any]]:
+    raw = stats.get("opportunities") if isinstance(stats.get("opportunities"), list) else []
+    opportunities: list[dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        listing = item.get("listing") if isinstance(item.get("listing"), dict) else {}
+        valuation = item.get("valuation") if isinstance(item.get("valuation"), dict) else {}
+        name = str(listing.get("name") or "Unnamed asset").strip()
+        url = str(listing.get("url") or "").strip()
+        asking_price = _safe_float(listing.get("asking_price")) or 0.0
+        real_value = _safe_float(valuation.get("estimated_real_value")) or 0.0
+        profit = _safe_float(valuation.get("profit_potential")) or 0.0
+        score = _safe_float(item.get("opportunity_score")) or 0.0
+        if not _is_asset_opportunity_sane(name, url, asking_price, real_value, profit):
+            continue
+        opportunities.append(
+            {
+                "name": name[:120],
+                "url": url,
+                "marketplace": _title(str(listing.get("marketplace") or "marketplace")),
+                "score": score,
+                "score_label": _format_score(score),
+                "tone": _score_tone(score),
+                "asking_price": asking_price,
+                "real_value": real_value,
+                "profit_potential": profit,
+                "asking_label": _format_money(asking_price),
+                "value_label": _format_money(real_value),
+                "profit_label": _format_money(profit),
+                "detected_at": item.get("detected_at"),
+            }
+        )
+    return sorted(opportunities, key=lambda row: (row["score"], row["profit_potential"]), reverse=True)
+
+
+def _is_asset_opportunity_sane(name: str, url: str, asking_price: float, real_value: float, profit: float) -> bool:
+    generic_names = {"view listing", "read more", "pricing", "websites", "blog", "sales@empireflippers.com"}
+    normalized = name.strip().lower()
+    if not url.startswith("http") or normalized in generic_names:
+        return False
+    if asking_price <= 0 or real_value <= 0 or profit <= 0:
+        return False
+    return asking_price <= 50_000_000 and real_value <= 250_000_000
+
+
+def _estimate_domain_sale_price(score: float) -> float:
+    if score >= 95:
+        return 12_500.0
+    if score >= 90:
+        return 7_500.0
+    if score >= 85:
+        return 3_500.0
+    if score >= 80:
+        return 1_500.0
+    if score >= 75:
+        return 750.0
+    return 299.0
+
+
+def _trend_display_item(topic: dict[str, Any]) -> dict[str, Any]:
+    score = _safe_float(topic.get("score")) or 0.0
+    components = topic.get("component_scores") if isinstance(topic.get("component_scores"), dict) else {}
+    growth_velocity = _safe_float(components.get("growth_velocity"))
+    platforms = topic.get("platforms") if isinstance(topic.get("platforms"), list) else []
+    velocity = _trend_velocity(score, growth_velocity)
+    return {
+        "name": str(topic.get("name") or "Unknown trend")[:150],
+        "score": score,
+        "score_label": _format_score(score),
+        "score_width": max(3, min(100, score)),
+        "tone": _score_tone(score),
+        "platforms": [str(platform) for platform in platforms],
+        "platform_badges": _platform_badges(platforms),
+        "velocity": velocity["label"],
+        "velocity_tone": velocity["tone"],
+        "observed_at": topic.get("observed_at"),
+        "signal_count": topic.get("signal_count"),
+    }
+
+
+def _trend_velocity(score: float, growth_velocity: float | None) -> dict[str, str]:
+    velocity = growth_velocity if growth_velocity is not None else score
+    if velocity >= 100 or score >= 80:
+        return {"label": "SURGING", "tone": "good"}
+    if velocity >= 50 or score >= 60:
+        return {"label": "RISING", "tone": "warning"}
+    return {"label": "WATCH", "tone": "danger"}
+
+
+def _platform_badges(platforms: list[Any]) -> list[dict[str, str]]:
+    labels = {
+        "reddit": "R",
+        "google": "G",
+        "google_trends": "G",
+        "twitter": "X",
+        "x": "X",
+        "tiktok": "TT",
+    }
+    badges = []
+    for platform in platforms:
+        key = str(platform).lower()
+        badges.append({"label": labels.get(key, key[:2].upper()), "name": _title(key)})
+    return badges or [{"label": "NA", "name": "Unknown"}]
+
+
+def _score_tone(score: float | None) -> str:
+    if score is None:
+        return "neutral"
+    if score >= 75:
+        return "good"
+    if score >= 50:
+        return "warning"
+    return "danger"
+
+
 def _read_trend_db(db_path: Path, now: datetime) -> tuple[int | None, list[dict[str, Any]]]:
     if not db_path.exists():
         return None, []
@@ -394,7 +695,7 @@ def _read_trend_db(db_path: Path, now: datetime) -> tuple[int | None, list[dict[
             ).fetchone()[0]
             rows = connection.execute(
                 """
-                SELECT name, score, platforms_json, observed_at
+                SELECT name, score, component_scores_json, platforms_json, observed_at, signal_count
                 FROM trends
                 WHERE observed_at >= ?
                 ORDER BY score DESC, observed_at DESC
@@ -406,7 +707,10 @@ def _read_trend_db(db_path: Path, now: datetime) -> tuple[int | None, list[dict[
             {
                 "name": row["name"],
                 "score": row["score"],
+                "component_scores": _json_loads(row["component_scores_json"], {}),
                 "platforms": _json_loads(row["platforms_json"], []),
+                "observed_at": row["observed_at"],
+                "signal_count": row["signal_count"],
             }
             for row in rows
         ]
@@ -428,7 +732,14 @@ def _read_trend_logs(log_path: Path, now: datetime) -> tuple[int, list[dict[str,
                 count = max(count, int(match.group(1)))
         trend_match = re.search(r"Trend Hunter Alert.*?Trend:</b>\s*([^<]+).*?Score:</b>\s*([0-9.]+)", line)
         if trend_match:
-            top.append({"name": trend_match.group(1), "score": _safe_float(trend_match.group(2))})
+            top.append(
+                {
+                    "name": trend_match.group(1),
+                    "score": _safe_float(trend_match.group(2)),
+                    "platforms": ["reddit"],
+                    "observed_at": timestamp.isoformat() if timestamp else None,
+                }
+            )
     return count, top[:5]
 
 
@@ -681,6 +992,7 @@ def _merge_shared_statuses(
         card["status"] = str(status.get("status") or "STOPPED").upper() if is_fresh else "STOPPED"
         if updated_at:
             card["last_update"] = _format_dt(updated_at)
+            card["last_update_ts"] = updated_at.isoformat()
         metrics = status.get("metrics") if isinstance(status.get("metrics"), dict) else {}
         _apply_shared_metrics(card, metrics)
         if status.get("error"):
@@ -696,36 +1008,211 @@ def _apply_shared_metrics(card: dict[str, Any], metrics: dict[str, Any]) -> None
         if isinstance(apys, dict):
             for item in card.get("apys", []):
                 key = str(item.get("protocol", "")).lower()
-                item["value"] = _format_percent(_safe_float(apys.get(key)))
+                if key in apys:
+                    item["raw"] = _safe_float(apys.get(key))
+                    item["value"] = _format_percent(item["raw"])
+            best = max(
+                ((str(item.get("protocol", "")).lower(), _safe_float(item.get("raw"))) for item in card.get("apys", [])),
+                key=lambda row: row[1] if row[1] is not None else -1,
+                default=(None, None),
+            )
+            if best[0] and best[1] is not None:
+                card["best_protocol"] = _title(best[0])
+                card["best_apy"] = best[1]
+                card["best_apy_label"] = _format_percent(best[1])
+                for item in card.get("apys", []):
+                    item["is_best"] = str(item.get("protocol", "")).lower() == best[0]
         if metrics.get("best_protocol"):
-            _replace_metric(card, "Best protocol", _title(str(metrics.get("best_protocol"))))
-        _replace_metric(card, "Simulated profit", _format_money(_safe_float(metrics.get("simulated_profit"))))
+            card["best_protocol"] = _title(str(metrics.get("best_protocol")))
+            _replace_metric(card, "Best protocol", card["best_protocol"], "good")
+        if "simulated_profit" in metrics:
+            _replace_metric(card, "Simulated profit", _format_money(_safe_float(metrics.get("simulated_profit"))))
     elif bot_id == "domain":
-        _replace_metric(card, "Domains scanned today", _format_int(_safe_float(metrics.get("domains_scanned_today"))))
-        _replace_metric(card, "Opportunities found", _format_int(_safe_float(metrics.get("opportunities_found"))))
+        if "domains_scanned_today" in metrics:
+            _replace_metric(card, "Domains scanned today", _format_int(_safe_float(metrics.get("domains_scanned_today"))))
+        if "opportunities_found" in metrics:
+            opportunities = _safe_float(metrics.get("opportunities_found"))
+            card["opportunities_today"] = int(opportunities or 0)
+            _replace_metric(card, "Opportunities found", _format_int(opportunities), "good" if opportunities else "warning")
+        if "domains_registered" in metrics:
+            registered = int(_safe_float(metrics.get("domains_registered")) or 0)
+            card.setdefault("inventory", {})["registered"] = registered
+            card["inventory"]["registered_label"] = _format_int(registered)
         if metrics.get("last_domain_registered"):
             _replace_metric(card, "Last domain registered", str(metrics.get("last_domain_registered")))
     elif bot_id == "asset":
-        _replace_metric(card, "Assets scanned", _format_int(_safe_float(metrics.get("assets_scanned"))))
-        _replace_metric(card, "Opportunities found", _format_int(_safe_float(metrics.get("opportunities_found"))))
-        _replace_metric(card, "Total potential profit", _format_money(_safe_float(metrics.get("total_potential_profit"))))
+        if "assets_scanned" in metrics:
+            _replace_metric(card, "Assets scanned", _format_int(_safe_float(metrics.get("assets_scanned"))))
+        if "opportunities_found" in metrics:
+            opportunities = _safe_float(metrics.get("opportunities_found"))
+            _replace_metric(card, "Opportunities found", _format_int(opportunities), "good" if opportunities else "warning")
+        if "total_potential_profit" in metrics:
+            total_profit = _safe_float(metrics.get("total_potential_profit"))
+            if total_profit is not None and total_profit > (card.get("potential_profit") or 0):
+                card["potential_profit"] = total_profit
+                _replace_metric(card, "Total potential profit", _format_money(total_profit), "good" if total_profit else "warning")
     elif bot_id == "trend":
-        _replace_metric(card, "Trends detected today", _format_int(_safe_float(metrics.get("trends_detected_today"))))
+        if "trends_detected_today" in metrics:
+            trends = _safe_float(metrics.get("trends_detected_today"))
+            card["opportunities_today"] = int(trends or 0)
+            _replace_metric(card, "Trends detected today", _format_int(trends), "good" if trends else "warning")
         topics = metrics.get("top_topics")
         if isinstance(topics, list):
-            card["details"] = [
-                {"label": str(topic.get("name", "Unknown trend")), "value": _format_score(topic.get("score"))}
-                for topic in topics[:5]
-                if isinstance(topic, dict)
-            ]
+            display_topics = [_trend_display_item(topic) for topic in topics[:5] if isinstance(topic, dict)]
+            card["top_trends"] = display_topics
+            card["details"] = [{"label": topic["name"], "value": topic["score_label"]} for topic in display_topics]
 
 
-def _replace_metric(card: dict[str, Any], label: str, value: str) -> None:
+def _replace_metric(card: dict[str, Any], label: str, value: str, tone: str | None = None) -> None:
     for metric in card.get("metrics", []):
         if metric.get("label") == label:
             metric["value"] = value
+            if tone:
+                metric["tone"] = tone
             return
-    card.setdefault("metrics", []).append({"label": label, "value": value})
+    item = {"label": label, "value": value}
+    if tone:
+        item["tone"] = tone
+    card.setdefault("metrics", []).append(item)
+
+
+def _build_summary(cards: list[dict[str, Any]], now: datetime) -> list[dict[str, Any]]:
+    total_balance = sum(_safe_float(card.get("simulated_balance")) or 0.0 for card in cards)
+    total_opportunities = sum(int(_safe_float(card.get("opportunities_today")) or 0) for card in cards)
+    total_profit = sum(_safe_float(card.get("potential_profit")) or 0.0 for card in cards)
+    running = sum(1 for card in cards if card.get("status") == "RUNNING")
+    uptime_seconds = max(0, int((now - APP_STARTED_AT).total_seconds()))
+    return [
+        {
+            "label": "Simulated Balance",
+            "value": _format_money(total_balance),
+            "caption": "Paper capital plus marked portfolio value",
+            "tone": "good" if total_balance > 0 else "warning",
+        },
+        {
+            "label": "Opportunities Today",
+            "value": _format_int(total_opportunities),
+            "caption": "Domains, assets and trends detected",
+            "tone": "good" if total_opportunities else "warning",
+        },
+        {
+            "label": "Potential Profit",
+            "value": _format_money(total_profit),
+            "caption": "Modeled upside from active signals",
+            "tone": "good" if total_profit > 0 else "warning",
+        },
+        {
+            "label": "System Uptime",
+            "value": _human_duration(uptime_seconds),
+            "caption": f"{running}/{len(cards)} bots online",
+            "tone": "good" if running == len(cards) else "danger" if running == 0 else "warning",
+        },
+    ]
+
+
+def _build_activity_feed(
+    cards: list[dict[str, Any]],
+    shared_statuses: dict[str, dict[str, Any]],
+    now: datetime,
+) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+
+    def add_event(bot_id: str, bot_name: str, message: str, timestamp: Any, severity: str = "info") -> None:
+        parsed = _parse_dt(timestamp) or now
+        events.append(
+            {
+                "bot_id": bot_id,
+                "bot": bot_name,
+                "message": message[:220],
+                "time": _format_dt(parsed),
+                "timestamp": parsed.isoformat(),
+                "tone": _severity_tone(severity),
+            }
+        )
+
+    for card in cards:
+        status = str(card.get("status") or "UNKNOWN")
+        add_event(str(card["id"]), str(card["name"]), f"Status heartbeat: {status}", card.get("last_update_ts"), status)
+
+    for bot_id, status in shared_statuses.items():
+        if status.get("error"):
+            add_event(bot_id, BOT_CONFIG.get(bot_id, {}).get("label", bot_id), f"Supervisor error: {status['error']}", status.get("updated_at"), "error")
+
+    domain_root = _bot_root("domain")
+    for row in _json_log_tail(domain_root / "logs/domain_hunter_bot.log", 120)[-40:]:
+        event = str(row.get("event_name") or row.get("message") or "domain_event")
+        domain = row.get("domain")
+        score = row.get("score")
+        message = event
+        if domain:
+            message += f" | {domain}"
+        if score is not None:
+            message += f" | score {_format_score(score)}"
+        add_event("domain", "Domain Hunter", message, row.get("timestamp"), row.get("severity", "info"))
+
+    asset_card = next((card for card in cards if card.get("id") == "asset"), None)
+    if asset_card:
+        for item in asset_card.get("top_opportunities", [])[:8]:
+            add_event(
+                "asset",
+                "Asset Flip",
+                f"Opportunity {item.get('score_label')} | {item.get('name')} | upside {item.get('profit_label')}",
+                item.get("detected_at") or asset_card.get("last_update_ts"),
+                item.get("tone", "info"),
+            )
+
+    trend_card = next((card for card in cards if card.get("id") == "trend"), None)
+    if trend_card:
+        for item in trend_card.get("top_trends", [])[:8]:
+            platforms = ", ".join(item.get("platforms") or [])
+            suffix = f" | {platforms}" if platforms else ""
+            add_event(
+                "trend",
+                "Trend Hunter",
+                f"{item.get('velocity')} trend {item.get('score_label')} | {item.get('name')}{suffix}",
+                item.get("observed_at") or trend_card.get("last_update_ts"),
+                item.get("velocity_tone", "info"),
+            )
+
+    yield_card = next((card for card in cards if card.get("id") == "yield"), None)
+    if yield_card and yield_card.get("chart", {}).get("points"):
+        point = yield_card["chart"]["points"][-1]
+        add_event(
+            "yield",
+            "Yield Optimizer",
+            f"APY sample | {point.get('protocol')} at {point.get('value_label')}",
+            yield_card.get("last_update_ts"),
+            "good",
+        )
+
+    events.sort(key=lambda item: item["timestamp"], reverse=True)
+    return events[:20]
+
+
+def _severity_tone(severity: str) -> str:
+    text = str(severity).lower()
+    if text in {"running", "good", "info", "ok", "success"}:
+        return "good"
+    if text in {"warning", "warn", "stopped"}:
+        return "warning"
+    if text in {"error", "critical", "danger", "failed"}:
+        return "danger"
+    return "neutral"
+
+
+def _human_duration(seconds: float | int) -> str:
+    remaining = max(0, int(seconds))
+    days, remaining = divmod(remaining, 86_400)
+    hours, remaining = divmod(remaining, 3_600)
+    minutes, seconds = divmod(remaining, 60)
+    if days:
+        return f"{days}d {hours}h"
+    if hours:
+        return f"{hours}h {minutes}m"
+    if minutes:
+        return f"{minutes}m {seconds}s"
+    return f"{seconds}s"
+
 
 EMBEDDED_BOTS = {
     "yield": {

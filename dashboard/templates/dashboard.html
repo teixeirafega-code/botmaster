@@ -7,190 +7,487 @@
   <style>
     :root {
       color-scheme: dark;
-      --bg: #070a11;
-      --panel: #101827;
-      --panel-soft: #141f32;
+      --bg: #05070b;
+      --panel: #0b111c;
+      --panel-2: #0f1724;
+      --panel-3: #111b2b;
       --line: rgba(148, 163, 184, .18);
-      --text: #e5e7eb;
-      --muted: #94a3b8;
+      --line-strong: rgba(148, 163, 184, .32);
+      --text: #e5eefb;
+      --muted: #8ea0b8;
       --green: #22c55e;
+      --green-soft: rgba(34, 197, 94, .13);
       --blue: #38bdf8;
       --amber: #f59e0b;
       --purple: #a78bfa;
       --red: #ef4444;
+      --red-soft: rgba(239, 68, 68, .14);
+      --yellow-soft: rgba(245, 158, 11, .14);
+      --shadow: 0 18px 46px rgba(0, 0, 0, .34);
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      background: var(--bg);
+      min-width: 320px;
+      background:
+        linear-gradient(180deg, rgba(56, 189, 248, .05), transparent 260px),
+        repeating-linear-gradient(0deg, rgba(255, 255, 255, .018), rgba(255, 255, 255, .018) 1px, transparent 1px, transparent 34px),
+        var(--bg);
       color: var(--text);
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
     .shell {
-      width: min(1320px, calc(100vw - 32px));
+      width: min(1500px, calc(100vw - 32px));
       margin: 0 auto;
-      padding: 28px 0 40px;
+      padding: 24px 0 42px;
     }
-    header {
+    .topbar {
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 16px;
-      padding-bottom: 22px;
+      padding-bottom: 18px;
       border-bottom: 1px solid var(--line);
     }
+    h1, h2, h3, p { margin: 0; }
     h1 {
-      margin: 0 0 4px;
-      font-size: 28px;
+      font-size: 26px;
       letter-spacing: 0;
+      line-height: 1.15;
     }
-    .subtle { color: var(--muted); font-size: 14px; }
-    .header-actions {
+    .subtle {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .actions {
       display: flex;
       align-items: center;
-      gap: 12px;
-      flex-wrap: wrap;
       justify-content: flex-end;
-    }
-    .summary {
-      display: flex;
       gap: 10px;
       flex-wrap: wrap;
-      margin: 22px 0;
     }
-    .pill {
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      padding: 7px 12px;
-      color: var(--muted);
-      background: rgba(20, 31, 50, .68);
-      font-size: 13px;
-    }
-    .logout {
-      border: 1px solid var(--line);
-      background: transparent;
-      color: var(--text);
-      height: 36px;
-      border-radius: 6px;
-      padding: 0 12px;
-      cursor: pointer;
-    }
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 16px;
-    }
-    .card {
-      border: 1px solid var(--line);
-      background: linear-gradient(180deg, rgba(20, 31, 50, .96), rgba(16, 24, 39, .98));
-      border-radius: 8px;
-      padding: 18px;
-      min-height: 310px;
-      box-shadow: 0 18px 48px rgba(0, 0, 0, .22);
-    }
-    .card-top {
-      display: flex;
-      align-items: start;
-      justify-content: space-between;
-      gap: 12px;
-      margin-bottom: 18px;
-    }
-    .card h2 {
-      margin: 0;
-      font-size: 19px;
-      letter-spacing: 0;
-    }
-    .status {
+    .pill, .status {
       display: inline-flex;
       align-items: center;
       gap: 8px;
-      border-radius: 999px;
-      padding: 6px 10px;
-      font-size: 12px;
-      font-weight: 800;
+      height: 32px;
+      padding: 0 11px;
       border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(15, 23, 36, .78);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 760;
+      white-space: nowrap;
+    }
+    .logout {
+      height: 32px;
+      border: 1px solid var(--line);
+      background: rgba(15, 23, 36, .84);
+      color: var(--text);
+      border-radius: 6px;
+      padding: 0 12px;
+      cursor: pointer;
+      font-weight: 700;
+    }
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin: 18px 0;
+    }
+    .summary-card, .bot-card, .activity {
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(17, 27, 43, .94), rgba(9, 14, 24, .98));
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }
+    .summary-card {
+      min-height: 112px;
+      padding: 15px;
+      position: relative;
+      overflow: hidden;
+    }
+    .summary-card::after {
+      content: "";
+      position: absolute;
+      inset: auto 12px 0 12px;
+      height: 2px;
+      background: var(--line);
+    }
+    .summary-card.good::after { background: var(--green); }
+    .summary-card.warning::after { background: var(--amber); }
+    .summary-card.danger::after { background: var(--red); }
+    .summary-label {
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+    }
+    .summary-value {
+      margin-top: 10px;
+      font-size: 30px;
+      font-weight: 850;
+      line-height: 1.05;
+      overflow-wrap: anywhere;
+    }
+    .summary-caption {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.4;
+    }
+    .bot-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+    .bot-card {
+      min-height: 420px;
+      padding: 16px;
+      overflow: hidden;
+    }
+    .card-top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    .bot-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .accent-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      background: var(--blue);
+      box-shadow: 0 0 18px currentColor;
+      color: var(--blue);
+      flex: 0 0 auto;
+    }
+    .accent-green .accent-dot { background: var(--green); color: var(--green); }
+    .accent-blue .accent-dot { background: var(--blue); color: var(--blue); }
+    .accent-amber .accent-dot { background: var(--amber); color: var(--amber); }
+    .accent-purple .accent-dot { background: var(--purple); color: var(--purple); }
+    .bot-card h2 {
+      font-size: 18px;
+      line-height: 1.2;
+      letter-spacing: 0;
     }
     .status::before {
       content: "";
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
       background: var(--red);
+      box-shadow: 0 0 12px var(--red);
     }
-    .status.running::before { background: var(--green); }
+    .status.running {
+      color: #c7f9d8;
+      border-color: rgba(34, 197, 94, .38);
+      background: var(--green-soft);
+    }
+    .status.running::before {
+      background: var(--green);
+      box-shadow: 0 0 12px var(--green);
+    }
     .metric-grid {
       display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 10px;
-      margin-bottom: 16px;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 9px;
+      margin-bottom: 14px;
     }
     .metric {
-      background: rgba(7, 10, 17, .42);
+      min-height: 76px;
+      padding: 11px;
       border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 12px;
-      min-height: 78px;
+      border-radius: 7px;
+      background: rgba(5, 7, 11, .48);
     }
-    .metric.wide { grid-column: 1 / -1; }
     .metric-label {
       color: var(--muted);
-      font-size: 12px;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .06em;
       margin-bottom: 8px;
     }
     .metric-value {
-      font-size: 21px;
-      font-weight: 800;
+      font-size: 19px;
+      font-weight: 820;
+      line-height: 1.12;
       overflow-wrap: anywhere;
     }
-    .apy-list, .detail-list {
+    .tone-good { color: var(--green); }
+    .tone-warning { color: var(--amber); }
+    .tone-danger { color: var(--red); }
+    .section {
+      margin-top: 14px;
+      padding-top: 14px;
+      border-top: 1px solid var(--line);
+    }
+    .section-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+      color: #d8e2f0;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      font-weight: 850;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 24px;
+      padding: 0 8px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(15, 23, 36, .8);
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 850;
+      white-space: nowrap;
+    }
+    .badge.good {
+      color: #c7f9d8;
+      background: var(--green-soft);
+      border-color: rgba(34, 197, 94, .34);
+    }
+    .badge.warning {
+      color: #ffe2aa;
+      background: var(--yellow-soft);
+      border-color: rgba(245, 158, 11, .38);
+    }
+    .badge.danger {
+      color: #fecaca;
+      background: var(--red-soft);
+      border-color: rgba(239, 68, 68, .38);
+    }
+    .chart-wrap {
+      height: 154px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: linear-gradient(180deg, rgba(5, 7, 11, .62), rgba(5, 7, 11, .28));
+      padding: 10px;
+    }
+    .chart-wrap svg {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+    .apy-row, .domain-row, .trend-row, .feed-row {
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: rgba(5, 7, 11, .42);
+    }
+    .apy-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .apy-row {
+      padding: 10px;
+      min-width: 0;
+    }
+    .row-label {
+      color: var(--muted);
+      font-size: 12px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .row-value {
+      margin-top: 6px;
+      font-size: 17px;
+      font-weight: 850;
+    }
+    .data-list {
       display: grid;
       gap: 8px;
-      margin-top: 12px;
     }
-    .row {
+    .domain-row, .trend-row {
+      padding: 10px 11px;
+    }
+    .split {
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 12px;
-      padding: 10px 12px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: rgba(7, 10, 17, .35);
+      min-width: 0;
     }
-    .row span:first-child {
-      color: var(--muted);
+    .truncate {
       min-width: 0;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
-    .row strong {
+    .mini-stats {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .mini-stat {
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 10px;
+      background: rgba(5, 7, 11, .38);
+    }
+    .mini-stat strong {
+      display: block;
+      margin-top: 5px;
+      font-size: 18px;
+    }
+    .asset-toolbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+    }
+    .filter-group {
+      display: inline-flex;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      overflow: hidden;
+      background: rgba(5, 7, 11, .44);
+    }
+    .filter-button {
+      border: 0;
+      border-right: 1px solid var(--line);
+      background: transparent;
+      color: var(--muted);
+      height: 30px;
+      padding: 0 10px;
+      cursor: pointer;
+      font-weight: 800;
+      font-size: 12px;
+    }
+    .filter-button:last-child { border-right: 0; }
+    .filter-button.active {
+      color: #c7f9d8;
+      background: var(--green-soft);
+    }
+    .asset-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) repeat(3, minmax(92px, .32fr)) 46px;
+      gap: 10px;
+      align-items: center;
+      padding: 11px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: rgba(5, 7, 11, .42);
+    }
+    .asset-link {
+      color: var(--blue);
+      text-decoration: none;
+      font-weight: 850;
+    }
+    .asset-label {
+      color: var(--muted);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+    }
+    .score-bar {
+      height: 8px;
+      border-radius: 999px;
+      background: rgba(148, 163, 184, .18);
+      overflow: hidden;
+      margin-top: 8px;
+    }
+    .score-fill {
+      height: 100%;
+      width: 0;
+      border-radius: inherit;
+      background: var(--amber);
+    }
+    .score-fill.good { background: var(--green); }
+    .score-fill.warning { background: var(--amber); }
+    .score-fill.danger { background: var(--red); }
+    .platforms {
+      display: inline-flex;
+      gap: 5px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+    .platform {
+      width: 25px;
+      height: 25px;
+      border-radius: 999px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--line-strong);
+      color: var(--text);
+      background: rgba(15, 23, 36, .9);
+      font-size: 10px;
+      font-weight: 900;
+    }
+    .activity {
+      margin-top: 14px;
+      padding: 16px;
+    }
+    .feed-row {
+      display: grid;
+      grid-template-columns: 152px 122px minmax(0, 1fr);
+      gap: 12px;
+      align-items: center;
+      padding: 10px 11px;
+    }
+    .feed-time, .feed-bot {
+      color: var(--muted);
+      font-size: 12px;
       white-space: nowrap;
     }
-    .accent-green { border-top: 3px solid var(--green); }
-    .accent-blue { border-top: 3px solid var(--blue); }
-    .accent-amber { border-top: 3px solid var(--amber); }
-    .accent-purple { border-top: 3px solid var(--purple); }
-    @media (max-width: 860px) {
-      .grid { grid-template-columns: 1fr; }
-      header { align-items: flex-start; flex-direction: column; }
-      .header-actions { justify-content: flex-start; }
+    .empty {
+      border: 1px dashed var(--line-strong);
+      border-radius: 7px;
+      padding: 18px;
+      color: var(--muted);
+      text-align: center;
+      background: rgba(5, 7, 11, .28);
     }
-    @media (max-width: 560px) {
-      .metric-grid { grid-template-columns: 1fr; }
-      .metric.wide { grid-column: auto; }
-      .shell { width: min(100vw - 20px, 1320px); padding-top: 18px; }
+    @media (max-width: 1180px) {
+      .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .apy-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .mini-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 900px) {
+      .topbar { align-items: flex-start; flex-direction: column; }
+      .actions { justify-content: flex-start; }
+      .bot-grid { grid-template-columns: 1fr; }
+      .asset-row { grid-template-columns: minmax(0, 1fr) repeat(2, minmax(86px, .4fr)); }
+      .asset-row .hide-mobile { display: none; }
+      .feed-row { grid-template-columns: 1fr; gap: 4px; }
+    }
+    @media (max-width: 580px) {
+      .shell { width: min(100vw - 20px, 1500px); padding-top: 16px; }
+      h1 { font-size: 22px; }
+      .summary-value { font-size: 25px; }
+      .summary-grid, .metric-grid, .apy-grid, .mini-stats { grid-template-columns: 1fr; }
+      .card-top { align-items: flex-start; flex-direction: column; }
+      .asset-row { grid-template-columns: 1fr; }
+      .summary-card, .bot-card, .activity { border-radius: 7px; }
     }
   </style>
 </head>
 <body>
   <main class="shell">
-    <header>
+    <header class="topbar">
       <div>
         <h1>BotMaster Dashboard</h1>
         <div class="subtle">Last refresh: <span id="generated-at">{{ snapshot.generated_label }}</span></div>
       </div>
-      <div class="header-actions">
+      <div class="actions">
         <span class="pill">Auto refresh: 30s</span>
         <span class="pill"><span id="running-count">{{ snapshot.running_count }}</span> running</span>
         <span class="pill"><span id="stopped-count">{{ snapshot.stopped_count }}</span> stopped</span>
@@ -200,84 +497,195 @@
       </div>
     </header>
 
-    <section class="grid" id="cards">
-      {% for card in snapshot.cards %}
-      <article class="card accent-{{ card.accent }}" data-card-id="{{ card.id }}">
-        <div class="card-top">
-          <div>
-            <h2>{{ card.name }}</h2>
-            <div class="subtle">Updated: <span data-field="last_update">{{ card.last_update }}</span></div>
-          </div>
-          <span class="status {{ 'running' if card.status == 'RUNNING' else '' }}" data-field="status">{{ card.status }}</span>
-        </div>
-        <div class="metric-grid" data-field="metrics">
-          {% for metric in card.metrics %}
-          <div class="metric {{ 'wide' if loop.index == 3 else '' }}">
-            <div class="metric-label">{{ metric.label }}</div>
-            <div class="metric-value">{{ metric.value }}</div>
-          </div>
-          {% endfor %}
-        </div>
-        {% if card.apys %}
-        <div class="apy-list" data-field="apys">
-          {% for apy in card.apys %}
-          <div class="row"><span>{{ apy.protocol }}</span><strong>{{ apy.value }}</strong></div>
-          {% endfor %}
-        </div>
-        {% endif %}
-        <div class="detail-list" data-field="details">
-          {% for detail in card.details %}
-          <div class="row"><span>{{ detail.label }}</span><strong>{{ detail.value }}</strong></div>
-          {% endfor %}
-        </div>
-      </article>
-      {% endfor %}
+    <section class="summary-grid" id="summary"></section>
+    <section class="bot-grid" id="cards"></section>
+
+    <section class="activity">
+      <div class="section-title">
+        <span>Activity Feed</span>
+        <span class="badge">Last 20 events</span>
+      </div>
+      <div class="data-list" id="activity-feed"></div>
     </section>
   </main>
 
   <script id="initial-data" type="application/json">{{ snapshot|json_script|safe }}</script>
   <script>
-    function metricMarkup(metrics) {
-      return metrics.map(function(metric, index) {
-        var wide = index === 2 ? " wide" : "";
-        return '<div class="metric' + wide + '"><div class="metric-label">' +
-          escapeHtml(metric.label) + '</div><div class="metric-value">' +
-          escapeHtml(metric.value) + '</div></div>';
-      }).join("");
-    }
-    function rowMarkup(rows, labelKey) {
-      if (!rows) return "";
-      return rows.map(function(row) {
-        var label = row[labelKey] || row.label || "";
-        return '<div class="row"><span>' + escapeHtml(label) + '</span><strong>' +
-          escapeHtml(row.value) + '</strong></div>';
-      }).join("");
-    }
+    var assetScoreFilter = 70;
+
     function escapeHtml(value) {
-      return String(value)
+      return String(value == null ? "" : value)
         .replace(/&/g, "&amp;")
         .replace(/</g, "&lt;")
         .replace(/>/g, "&gt;")
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#039;");
     }
+
+    function toneClass(tone) {
+      return tone ? " tone-" + escapeHtml(tone) : "";
+    }
+
+    function renderSummary(summary) {
+      var html = (summary || []).map(function(item) {
+        return '<article class="summary-card ' + escapeHtml(item.tone || "neutral") + '">' +
+          '<div class="summary-label">' + escapeHtml(item.label) + '</div>' +
+          '<div class="summary-value' + toneClass(item.tone) + '">' + escapeHtml(item.value) + '</div>' +
+          '<div class="summary-caption">' + escapeHtml(item.caption || "") + '</div>' +
+        '</article>';
+      }).join("");
+      document.getElementById("summary").innerHTML = html;
+    }
+
+    function renderMetrics(metrics) {
+      return '<div class="metric-grid">' + (metrics || []).map(function(metric) {
+        return '<div class="metric">' +
+          '<div class="metric-label">' + escapeHtml(metric.label) + '</div>' +
+          '<div class="metric-value' + toneClass(metric.tone) + '">' + escapeHtml(metric.value) + '</div>' +
+        '</div>';
+      }).join("") + '</div>';
+    }
+
+    function chartSvg(points) {
+      points = points || [];
+      if (points.length < 2) {
+        return '<div class="empty">No APY history</div>';
+      }
+      var values = points.map(function(point) { return Number(point.value) || 0; });
+      var min = Math.min.apply(null, values);
+      var max = Math.max.apply(null, values);
+      var spread = Math.max(max - min, 0.01);
+      var coords = points.map(function(point, index) {
+        var x = (index / (points.length - 1)) * 100;
+        var y = 92 - (((Number(point.value) || 0) - min) / spread) * 76;
+        return x.toFixed(2) + "," + y.toFixed(2);
+      }).join(" ");
+      var last = points[points.length - 1];
+      return '<svg viewBox="0 0 100 100" preserveAspectRatio="none" role="img">' +
+        '<defs><linearGradient id="apyLine" x1="0" x2="1" y1="0" y2="0"><stop stop-color="#38bdf8"/><stop offset="1" stop-color="#22c55e"/></linearGradient></defs>' +
+        '<line x1="0" y1="20" x2="100" y2="20" stroke="rgba(148,163,184,.15)" stroke-width=".5"/>' +
+        '<line x1="0" y1="56" x2="100" y2="56" stroke="rgba(148,163,184,.13)" stroke-width=".5"/>' +
+        '<line x1="0" y1="92" x2="100" y2="92" stroke="rgba(148,163,184,.13)" stroke-width=".5"/>' +
+        '<polyline fill="none" stroke="url(#apyLine)" stroke-width="2.2" vector-effect="non-scaling-stroke" points="' + coords + '"/>' +
+        '<text x="2" y="10" fill="#8ea0b8" font-size="5">' + escapeHtml(last.protocol) + ' ' + escapeHtml(last.value_label) + '</text>' +
+      '</svg>';
+    }
+
+    function renderYield(card) {
+      var apys = (card.apys || []).map(function(item) {
+        return '<div class="apy-row">' +
+          '<div class="split"><span class="row-label">' + escapeHtml(item.protocol) + '</span>' +
+          (item.is_best ? '<span class="badge good">BEST</span>' : '') + '</div>' +
+          '<div class="row-value' + (item.is_best ? ' tone-good' : '') + '">' + escapeHtml(item.value) + '</div>' +
+        '</div>';
+      }).join("");
+      return renderMetrics(card.metrics) +
+        '<div class="section"><div class="section-title"><span>APY History</span><span class="badge good">' +
+        escapeHtml(card.best_protocol) + ' ' + escapeHtml(card.best_apy_label) + '</span></div>' +
+        '<div class="chart-wrap">' + chartSvg(card.chart && card.chart.points) + '</div></div>' +
+        '<div class="section"><div class="section-title"><span>Protocol APYs</span><span class="badge">' +
+        escapeHtml(card.capital_label || "$140.00") + ' capital</span></div><div class="apy-grid">' + apys + '</div></div>';
+    }
+
+    function renderDomain(card) {
+      var inventory = card.inventory || {};
+      var top = (card.top_domains || []).map(function(item) {
+        return '<div class="domain-row"><div class="split">' +
+          '<div class="truncate"><strong>' + escapeHtml(item.name) + '</strong><div class="subtle">Estimated sale ' + escapeHtml(item.estimated_sale_price_label) + '</div></div>' +
+          '<span class="badge ' + escapeHtml(item.tone) + '">' + escapeHtml(item.score_label) + '</span>' +
+        '</div></div>';
+      }).join("") || '<div class="empty">No scored domains today</div>';
+      return renderMetrics(card.metrics) +
+        '<div class="section"><div class="section-title"><span>Portfolio</span><span class="badge good">' +
+        escapeHtml(inventory.portfolio_value_label || "$0.00") + '</span></div>' +
+        '<div class="mini-stats">' +
+        miniStat("Registered", inventory.registered_label || "0", "good") +
+        miniStat("Listed", inventory.listed_label || "0", "warning") +
+        miniStat("Sold", inventory.sold_label || "0", "good") +
+        miniStat("Value", inventory.portfolio_value_label || "$0.00", "good") +
+        '</div></div>' +
+        '<div class="section"><div class="section-title"><span>Top Domains Today</span><span class="badge">Top 5</span></div><div class="data-list">' + top + '</div></div>';
+    }
+
+    function miniStat(label, value, tone) {
+      return '<div class="mini-stat"><span class="row-label">' + escapeHtml(label) + '</span><strong class="tone-' +
+        escapeHtml(tone) + '">' + escapeHtml(value) + '</strong></div>';
+    }
+
+    function renderAsset(card) {
+      var filtered = (card.top_opportunities || []).filter(function(item) {
+        return Number(item.score || 0) >= assetScoreFilter;
+      }).slice(0, 3);
+      var rows = filtered.map(function(item) {
+        return '<div class="asset-row">' +
+          '<div class="truncate"><a class="asset-link" href="' + escapeHtml(item.url) + '" target="_blank" rel="noopener noreferrer">' +
+          escapeHtml(item.name) + '</a><div class="subtle">' + escapeHtml(item.marketplace) + ' | score ' + escapeHtml(item.score_label) + '</div></div>' +
+          '<div><div class="asset-label">Asking</div><strong>' + escapeHtml(item.asking_label) + '</strong></div>' +
+          '<div><div class="asset-label">Real Value</div><strong class="tone-good">' + escapeHtml(item.value_label) + '</strong></div>' +
+          '<div class="hide-mobile"><div class="asset-label">Profit</div><strong class="tone-good">' + escapeHtml(item.profit_label) + '</strong></div>' +
+          '<span class="badge ' + escapeHtml(item.tone) + '">' + escapeHtml(item.score_label) + '</span>' +
+        '</div>';
+      }).join("") || '<div class="empty">No opportunities match this score filter</div>';
+      return renderMetrics(card.metrics) +
+        '<div class="section"><div class="asset-toolbar"><div class="section-title" style="margin:0"><span>Top Opportunities</span></div>' +
+        '<div class="filter-group" data-filter-group="asset">' +
+        filterButton(70) + filterButton(80) + filterButton(90) +
+        '</div></div><div class="data-list">' + rows + '</div></div>';
+    }
+
+    function filterButton(score) {
+      return '<button class="filter-button ' + (assetScoreFilter === score ? 'active' : '') +
+        '" type="button" data-score-filter="' + score + '">' + score + '+</button>';
+    }
+
+    function renderTrend(card) {
+      var rows = (card.top_trends || []).map(function(item) {
+        var badges = (item.platform_badges || []).map(function(platform) {
+          return '<span class="platform" title="' + escapeHtml(platform.name) + '">' + escapeHtml(platform.label) + '</span>';
+        }).join("");
+        return '<div class="trend-row">' +
+          '<div class="split"><div class="truncate"><strong>' + escapeHtml(item.name) + '</strong><div class="subtle">' +
+          escapeHtml(item.velocity) + ' | signals ' + escapeHtml(item.signal_count || 0) + '</div></div><div class="platforms">' + badges + '</div></div>' +
+          '<div class="score-bar"><div class="score-fill ' + escapeHtml(item.tone) + '" style="width:' + escapeHtml(item.score_width) + '%"></div></div>' +
+          '<div class="split subtle"><span>Score</span><strong class="tone-' + escapeHtml(item.tone) + '">' + escapeHtml(item.score_label) + '</strong></div>' +
+        '</div>';
+      }).join("") || '<div class="empty">No trend rows available</div>';
+      return renderMetrics(card.metrics) +
+        '<div class="section"><div class="section-title"><span>Top Trends</span><span class="badge">Reddit / Google / X</span></div><div class="data-list">' + rows + '</div></div>';
+    }
+
+    function renderCard(card) {
+      var body = "";
+      if (card.id === "yield") body = renderYield(card);
+      else if (card.id === "domain") body = renderDomain(card);
+      else if (card.id === "asset") body = renderAsset(card);
+      else if (card.id === "trend") body = renderTrend(card);
+      else body = renderMetrics(card.metrics);
+      return '<article class="bot-card accent-' + escapeHtml(card.accent) + '" data-card-id="' + escapeHtml(card.id) + '">' +
+        '<div class="card-top"><div class="bot-title"><span class="accent-dot"></span><div><h2>' + escapeHtml(card.name) +
+        '</h2><div class="subtle">Updated: ' + escapeHtml(card.last_update) + '</div></div></div>' +
+        '<span class="status ' + (card.status === "RUNNING" ? "running" : "") + '">' + escapeHtml(card.status) + '</span></div>' +
+        body + '</article>';
+    }
+
+    function renderActivity(feed) {
+      var html = (feed || []).map(function(item) {
+        return '<div class="feed-row"><div class="feed-time">' + escapeHtml(item.time) + '</div>' +
+          '<div class="feed-bot tone-' + escapeHtml(item.tone) + '">' + escapeHtml(item.bot) + '</div>' +
+          '<div class="truncate">' + escapeHtml(item.message) + '</div></div>';
+      }).join("") || '<div class="empty">No events yet</div>';
+      document.getElementById("activity-feed").innerHTML = html;
+    }
+
     function renderSnapshot(snapshot) {
       document.getElementById("generated-at").textContent = snapshot.generated_label;
       document.getElementById("running-count").textContent = snapshot.running_count;
       document.getElementById("stopped-count").textContent = snapshot.stopped_count;
-      snapshot.cards.forEach(function(card) {
-        var element = document.querySelector('[data-card-id="' + card.id + '"]');
-        if (!element) return;
-        element.querySelector('[data-field="last_update"]').textContent = card.last_update;
-        var status = element.querySelector('[data-field="status"]');
-        status.textContent = card.status;
-        status.classList.toggle("running", card.status === "RUNNING");
-        element.querySelector('[data-field="metrics"]').innerHTML = metricMarkup(card.metrics);
-        var apys = element.querySelector('[data-field="apys"]');
-        if (apys) apys.innerHTML = rowMarkup(card.apys || [], "protocol");
-        element.querySelector('[data-field="details"]').innerHTML = rowMarkup(card.details || [], "label");
-      });
+      renderSummary(snapshot.summary);
+      document.getElementById("cards").innerHTML = (snapshot.cards || []).map(renderCard).join("");
+      renderActivity(snapshot.activity_feed);
     }
+
     async function refresh() {
       try {
         var response = await fetch("{{ url_for('api_status') }}", {cache: "no-store"});
@@ -290,6 +698,22 @@
       } catch (error) {
       }
     }
+
+    document.addEventListener("click", function(event) {
+      var button = event.target.closest("[data-score-filter]");
+      if (!button) return;
+      assetScoreFilter = Number(button.getAttribute("data-score-filter"));
+      renderSnapshot(window.currentSnapshot);
+    });
+
+    var initialSnapshot = JSON.parse(document.getElementById("initial-data").textContent);
+    window.currentSnapshot = initialSnapshot;
+    var originalRenderSnapshot = renderSnapshot;
+    renderSnapshot = function(snapshot) {
+      window.currentSnapshot = snapshot;
+      originalRenderSnapshot(snapshot);
+    };
+    renderSnapshot(initialSnapshot);
     setInterval(refresh, 30000);
   </script>
 </body>
