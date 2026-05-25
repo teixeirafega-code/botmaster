@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -46,6 +47,7 @@ def _write_sqlite(payload: dict[str, Any]) -> None:
         db_path.parent.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(db_path, timeout=10) as connection:
             connection.execute("PRAGMA journal_mode=WAL")
+            connection.execute("PRAGMA busy_timeout=5000")
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS bot_status (
@@ -78,8 +80,12 @@ def _write_sqlite(payload: dict[str, Any]) -> None:
                     payload["error"],
                 ),
             )
-    except Exception:
-        return
+    except Exception as exc:  # noqa: BLE001
+        print(
+            f"[botmaster_status] sqlite write failed for {payload.get('bot_id')}: {exc}",
+            file=sys.stderr,
+            flush=True,
+        )
 
 
 def _endpoint_from_base_url(base_url: str) -> str:
@@ -127,6 +133,9 @@ def _post_dashboard(payload: dict[str, Any]) -> None:
     try:
         with urlopen(request, timeout=8):
             return
-    except (OSError, URLError):
-        return
-
+    except (OSError, URLError) as exc:
+        print(
+            f"[botmaster_status] dashboard post failed for {payload.get('bot_id')}: {exc}",
+            file=sys.stderr,
+            flush=True,
+        )

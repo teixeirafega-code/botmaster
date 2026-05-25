@@ -804,17 +804,11 @@ def _bot_supervisor(bot_id: str, name: str, root: Path) -> None:
         _write_shared_status({"bot_id": bot_id, "bot_name": name, "status": "ERROR", "error": f"Bot directory not found: {root}"})
         return
 
+    heartbeat_seconds = max(15, int(os.getenv("BOTMASTER_HEARTBEAT_SECONDS", "30")))
+    restart_count = 0
     while not _EMBEDDED_STOP_EVENT.is_set():
         process: subprocess.Popen | None = None
         try:
-            _write_shared_status(
-                {
-                    "bot_id": bot_id,
-                    "bot_name": name,
-                    "status": "RUNNING",
-                    "metrics": {"embedded": True, "root": str(root)},
-                }
-            )
             process = subprocess.Popen(
                 [sys.executable, "-m", "app.main", "scheduler"],
                 cwd=root,
@@ -823,8 +817,42 @@ def _bot_supervisor(bot_id: str, name: str, root: Path) -> None:
             with _EMBEDDED_BOT_LOCK:
                 _EMBEDDED_BOT_PROCESSES[bot_id] = process
 
+            _write_shared_status(
+                {
+                    "bot_id": bot_id,
+                    "bot_name": name,
+                    "status": "RUNNING",
+                    "metrics": {
+                        "embedded": True,
+                        "supervisor": "dashboard.app",
+                        "pid": process.pid,
+                        "restart_count": restart_count,
+                        "root": str(root),
+                    },
+                }
+            )
+            print(f"[botmaster] Started {name} pid={process.pid} restart_count={restart_count}", flush=True)
+            next_heartbeat = time.monotonic() + heartbeat_seconds
+
             while process.poll() is None and not _EMBEDDED_STOP_EVENT.is_set():
-                time.sleep(5)
+                now = time.monotonic()
+                if now >= next_heartbeat:
+                    _write_shared_status(
+                        {
+                            "bot_id": bot_id,
+                            "bot_name": name,
+                            "status": "RUNNING",
+                            "metrics": {
+                                "embedded": True,
+                                "supervisor": "dashboard.app",
+                                "pid": process.pid,
+                                "restart_count": restart_count,
+                                "heartbeat_seconds": heartbeat_seconds,
+                            },
+                        }
+                    )
+                    next_heartbeat = now + heartbeat_seconds
+                time.sleep(2)
 
             if _EMBEDDED_STOP_EVENT.is_set() and process.poll() is None:
                 process.terminate()
@@ -839,23 +867,44 @@ def _bot_supervisor(bot_id: str, name: str, root: Path) -> None:
                 _write_shared_status({"bot_id": bot_id, "bot_name": name, "status": "STOPPED"})
                 break
 
+            restart_count += 1
+            error = f"Bot process exited with code {exit_code}; restarting"
+            print(f"[botmaster] {name} {error}", flush=True)
             _write_shared_status(
                 {
                     "bot_id": bot_id,
                     "bot_name": name,
                     "status": "ERROR",
-                    "error": f"Bot process exited with code {exit_code}",
+                    "metrics": {
+                        "embedded": True,
+                        "supervisor": "dashboard.app",
+                        "restart_count": restart_count,
+                    },
+                    "error": error,
                 }
             )
-            time.sleep(10)
+            time.sleep(min(60, 5 * restart_count))
         except Exception as exc:  # noqa: BLE001
-            _write_shared_status({"bot_id": bot_id, "bot_name": name, "status": "ERROR", "error": str(exc)})
-            time.sleep(10)
+            restart_count += 1
+            print(f"[botmaster] {name} supervisor error: {exc}", flush=True)
+            _write_shared_status(
+                {
+                    "bot_id": bot_id,
+                    "bot_name": name,
+                    "status": "ERROR",
+                    "metrics": {
+                        "embedded": True,
+                        "supervisor": "dashboard.app",
+                        "restart_count": restart_count,
+                    },
+                    "error": str(exc),
+                }
+            )
+            time.sleep(min(60, 5 * restart_count))
         finally:
             with _EMBEDDED_BOT_LOCK:
                 if _EMBEDDED_BOT_PROCESSES.get(bot_id) is process:
                     _EMBEDDED_BOT_PROCESSES.pop(bot_id, None)
-
 
 def _start_embedded_bots_once() -> None:
     global _EMBEDDED_BOTS_STARTED
@@ -905,6 +954,7 @@ _start_embedded_bots_once()
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "5000"))
     app.run(host="0.0.0.0", port=port)
+
 
 
 
