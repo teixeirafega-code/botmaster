@@ -109,6 +109,8 @@ def _dashboard_endpoint() -> str:
 
 
 def _post_dashboard(payload: dict[str, Any]) -> None:
+    if os.getenv("BOTMASTER_DISABLE_HTTP_STATUS", "").strip().lower() in {"1", "true", "yes", "on"}:
+        return
     token = os.getenv("BOTMASTER_STATUS_TOKEN")
     if not token:
         return
@@ -127,3 +129,4 @@ def _post_dashboard(payload: dict[str, Any]) -> None:
             return
     except (OSError, URLError):
         return
+

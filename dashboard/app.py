@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+import atexit
 import csv
 import hmac
 import json
@@ -8,6 +9,8 @@ import re
 import sqlite3
 import subprocess
 import sys
+import threading
+import time
 from collections import deque
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -589,6 +592,9 @@ def _shared_db_path() -> Path:
     if raw:
         path = Path(raw)
         return path if path.is_absolute() else BASE_DIR / path
+    render_disk = Path("/var/data")
+    if render_disk.exists():
+        return render_disk / "botmaster_status.sqlite"
     return BASE_DIR / "data" / "botmaster_status.sqlite"
 
 
@@ -720,13 +726,187 @@ def _replace_metric(card: dict[str, Any], label: str, value: str) -> None:
             metric["value"] = value
             return
     card.setdefault("metrics", []).append({"label": label, "value": value})
+
+EMBEDDED_BOTS = {
+    "yield": {
+        "name": "Yield Optimizer",
+        "root": BOTMASTER_ROOT / "project1" / "yield_optimizer_bot",
+    },
+    "domain": {
+        "name": "Domain Hunter",
+        "root": BOTMASTER_ROOT / "project2" / "projeto2",
+    },
+    "asset": {
+        "name": "Asset Flip",
+        "root": BOTMASTER_ROOT / "project3" / "asset_flip_bot",
+    },
+    "trend": {
+        "name": "Trend Hunter",
+        "root": BOTMASTER_ROOT / "project4" / "trend_hunter_bot",
+    },
+}
+
+_EMBEDDED_BOTS_STARTED = False
+_EMBEDDED_BOT_THREADS: list[threading.Thread] = []
+_EMBEDDED_BOT_PROCESSES: dict[str, subprocess.Popen] = {}
+_EMBEDDED_BOT_LOCK = threading.Lock()
+_EMBEDDED_STOP_EVENT = threading.Event()
+_EMBEDDED_DEPLOYMENT_LOCK_HANDLE: Any | None = None
+
+
+def _embedded_bots_enabled() -> bool:
+    value = os.getenv("BOTMASTER_EMBEDDED_BOTS", "true").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+def _acquire_embedded_deployment_lock() -> bool:
+    if os.name == "nt":
+        return True
+    try:
+        import fcntl  # type: ignore
+    except ImportError:
+        return True
+
+    global _EMBEDDED_DEPLOYMENT_LOCK_HANDLE
+    lock_path = _shared_db_path().with_name("botmaster_embedded_bots.lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    handle = lock_path.open("w", encoding="utf-8")
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        handle.close()
+        return False
+    handle.write(str(os.getpid()))
+    handle.flush()
+    _EMBEDDED_DEPLOYMENT_LOCK_HANDLE = handle
+    return True
+
+
+def _embedded_bot_env(bot_id: str) -> dict[str, str]:
+    env = os.environ.copy()
+    env["BOT_ID"] = bot_id
+    env["PYTHONUNBUFFERED"] = "1"
+    env["BOTMASTER_SHARED_DB"] = str(_shared_db_path())
+    env["BOTMASTER_DISABLE_HTTP_STATUS"] = "1"
+    for key in (
+        "BOTMASTER_STATUS_ENDPOINT",
+        "BOTMASTER_STATUS_HOSTPORT",
+        "BOTMASTER_DASHBOARD_URL",
+        "DASHBOARD_PUBLIC_URL",
+        "BOTMASTER_STATUS_TOKEN",
+    ):
+        env.pop(key, None)
+    return env
+
+
+def _bot_supervisor(bot_id: str, name: str, root: Path) -> None:
+    if not root.exists():
+        _write_shared_status({"bot_id": bot_id, "bot_name": name, "status": "ERROR", "error": f"Bot directory not found: {root}"})
+        return
+
+    while not _EMBEDDED_STOP_EVENT.is_set():
+        process: subprocess.Popen | None = None
+        try:
+            _write_shared_status(
+                {
+                    "bot_id": bot_id,
+                    "bot_name": name,
+                    "status": "RUNNING",
+                    "metrics": {"embedded": True, "root": str(root)},
+                }
+            )
+            process = subprocess.Popen(
+                [sys.executable, "-m", "app.main", "scheduler"],
+                cwd=root,
+                env=_embedded_bot_env(bot_id),
+            )
+            with _EMBEDDED_BOT_LOCK:
+                _EMBEDDED_BOT_PROCESSES[bot_id] = process
+
+            while process.poll() is None and not _EMBEDDED_STOP_EVENT.is_set():
+                time.sleep(5)
+
+            if _EMBEDDED_STOP_EVENT.is_set() and process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=20)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=5)
+
+            exit_code = process.poll()
+            if _EMBEDDED_STOP_EVENT.is_set():
+                _write_shared_status({"bot_id": bot_id, "bot_name": name, "status": "STOPPED"})
+                break
+
+            _write_shared_status(
+                {
+                    "bot_id": bot_id,
+                    "bot_name": name,
+                    "status": "ERROR",
+                    "error": f"Bot process exited with code {exit_code}",
+                }
+            )
+            time.sleep(10)
+        except Exception as exc:  # noqa: BLE001
+            _write_shared_status({"bot_id": bot_id, "bot_name": name, "status": "ERROR", "error": str(exc)})
+            time.sleep(10)
+        finally:
+            with _EMBEDDED_BOT_LOCK:
+                if _EMBEDDED_BOT_PROCESSES.get(bot_id) is process:
+                    _EMBEDDED_BOT_PROCESSES.pop(bot_id, None)
+
+
+def _start_embedded_bots_once() -> None:
+    global _EMBEDDED_BOTS_STARTED
+    if not _embedded_bots_enabled():
+        return
+    with _EMBEDDED_BOT_LOCK:
+        if _EMBEDDED_BOTS_STARTED:
+            return
+        if not _acquire_embedded_deployment_lock():
+            return
+        _EMBEDDED_BOTS_STARTED = True
+        for bot_id, config in EMBEDDED_BOTS.items():
+            thread = threading.Thread(
+                target=_bot_supervisor,
+                args=(bot_id, str(config["name"]), Path(config["root"])),
+                name=f"botmaster-{bot_id}",
+                daemon=True,
+            )
+            thread.start()
+            _EMBEDDED_BOT_THREADS.append(thread)
+        atexit.register(_stop_embedded_bots)
+
+
+def _stop_embedded_bots() -> None:
+    _EMBEDDED_STOP_EVENT.set()
+    with _EMBEDDED_BOT_LOCK:
+        processes = list(_EMBEDDED_BOT_PROCESSES.values())
+    for process in processes:
+        if process.poll() is None:
+            process.terminate()
+    for process in processes:
+        if process.poll() is None:
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                process.kill()
+
+
 @app.template_filter("json_script")
 def json_script(value: Any) -> str:
     return json.dumps(value, ensure_ascii=True).replace("</", "<\\/")
 
 
+_start_embedded_bots_once()
+
+
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "5000"))
     app.run(host="0.0.0.0", port=port)
+
+
+
 
 
