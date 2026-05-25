@@ -11,4 +11,4 @@ RUN pip install --upgrade pip \
 
 COPY . .
 
-CMD ["python", "-m", "app.main", "run"]
+CMD ["python", "-m", "app.supervisor"]

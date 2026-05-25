@@ -18,6 +18,10 @@ services:
         value: /var/data/botmaster_status.sqlite
       - key: PAPER_MODE
         value: "true"
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
       - key: DASHBOARD_PASSWORD
         sync: false
       - key: BOTMASTER_STATUS_TOKEN

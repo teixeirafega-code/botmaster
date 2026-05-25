@@ -4,7 +4,7 @@ services:
     runtime: python
     plan: starter
     buildCommand: pip install --upgrade pip && pip install -r requirements.txt
-    startCommand: python -m app.main scheduler
+    startCommand: python -m app.supervisor
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.0

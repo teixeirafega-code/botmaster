@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+import os
 import signal
 import threading
 import time
@@ -9,6 +10,14 @@ from app.botmaster_status import write_status
 from app.config.settings import AppSettings
 from app.services.asset_manager import AssetManager
 from app.utils.logger import get_logger
+
+
+def _heartbeat_seconds() -> int:
+    value = os.getenv("BOTMASTER_HEARTBEAT_SECONDS", "30")
+    try:
+        return max(15, int(value))
+    except ValueError:
+        return 30
 
 
 class BotScheduler:
@@ -57,7 +66,7 @@ class BotScheduler:
             elapsed = (datetime.now(timezone.utc) - started).total_seconds()
             sleep_for = max(0.0, interval_seconds - elapsed)
             self.logger.info("Next scan in %.0f seconds", sleep_for)
-            self.stop_event.wait(sleep_for)
+            self._wait_with_heartbeat(sleep_for)
         write_status("asset", "Asset Flip", "STOPPED")
         self.logger.info("Asset Flip Bot stopped")
 
@@ -74,6 +83,26 @@ class BotScheduler:
             signal.signal(signal.SIGTERM, handler)
         except ValueError:
             self.logger.debug("Signal handlers can only be installed from the main thread")
+
+    def _wait_with_heartbeat(self, sleep_for: float) -> None:
+        deadline = time.monotonic() + sleep_for
+        heartbeat_seconds = _heartbeat_seconds()
+        while not self.stop_event.is_set():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+            if self.stop_event.wait(min(heartbeat_seconds, remaining)):
+                return
+            write_status(
+                "asset",
+                "Asset Flip",
+                "RUNNING",
+                {
+                    "paper_mode": self.settings.paper_mode,
+                    "scan_interval_minutes": self.settings.scan_interval_minutes,
+                    "heartbeat_seconds": heartbeat_seconds,
+                },
+            )
 
 
 

@@ -15,5 +15,4 @@ RUN useradd --create-home --shell /bin/bash botuser \
     && chown -R botuser:botuser /opt/asset_flip_bot
 USER botuser
 
-CMD ["python", "-m", "app.main", "run"]
-
+CMD ["python", "-m", "app.supervisor"]

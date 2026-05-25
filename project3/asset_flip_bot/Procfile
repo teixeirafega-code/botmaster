@@ -1,1 +1,1 @@
-worker: python -m app.main scheduler
+worker: python -m app.supervisor

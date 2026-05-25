@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+import os
 import signal
 import threading
 import time
@@ -11,6 +12,14 @@ from app.utils.logger import get_logger
 
 
 logger = get_logger(__name__)
+
+
+def _heartbeat_seconds() -> int:
+    value = os.getenv("BOTMASTER_HEARTBEAT_SECONDS", "30")
+    try:
+        return max(15, int(value))
+    except ValueError:
+        return 30
 
 
 class TrendScheduler:
@@ -50,7 +59,7 @@ class TrendScheduler:
             elapsed = time.monotonic() - cycle_started
             wait_seconds = max(interval_seconds - elapsed, 1.0)
             logger.info("Next collection cycle starts in %.0f seconds", wait_seconds)
-            self.stop_event.wait(wait_seconds)
+            self._wait_with_heartbeat(wait_seconds)
 
         write_status("trend", "Trend Hunter", "STOPPED")
         logger.info("Scheduler stopped")
@@ -68,5 +77,24 @@ class TrendScheduler:
     def _handle_signal(self, signum: int, _frame: object) -> None:
         logger.info("Received signal %s; stopping scheduler", signum)
         self.stop()
+
+    def _wait_with_heartbeat(self, wait_seconds: float) -> None:
+        deadline = time.monotonic() + wait_seconds
+        heartbeat_seconds = _heartbeat_seconds()
+        while not self.stop_event.is_set():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+            if self.stop_event.wait(min(heartbeat_seconds, remaining)):
+                return
+            write_status(
+                "trend",
+                "Trend Hunter",
+                "RUNNING",
+                {
+                    "cycle_interval_minutes": self.settings.app.cycle_interval_minutes,
+                    "heartbeat_seconds": heartbeat_seconds,
+                },
+            )
 
 
