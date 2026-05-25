@@ -177,9 +177,8 @@ def _yield_card(process_lines: list[str], now: datetime) -> dict[str, Any]:
     estimated_monthly_profit = capital_usd * best_apy / 12 if best_apy is not None else 0.0
     simulated_profit = _yield_simulated_profit(paper_state, logs)
     chart_points = _yield_apy_chart_points(state, now)
-    next_rebalance = _yield_next_rebalance(root, state, paper_state, now)
-
     last_update = _latest_timestamp([root / "app/data/state.json", log_path], logs)
+    next_scan = _yield_next_scan(root, last_update, now)
     return {
         "id": "yield",
         "name": "Yield Optimizer",
@@ -196,7 +195,7 @@ def _yield_card(process_lines: list[str], now: datetime) -> dict[str, Any]:
         "estimated_monthly_profit": estimated_monthly_profit,
         "estimated_monthly_profit_label": _format_money(estimated_monthly_profit),
         "capital_label": _format_money(capital_usd),
-        "next_rebalance": next_rebalance,
+        "next_scan": next_scan,
         "chart": {
             "label": "Best APY last 24h",
             "points": chart_points,
@@ -205,7 +204,7 @@ def _yield_card(process_lines: list[str], now: datetime) -> dict[str, Any]:
             {"label": "Best protocol", "value": _title(best_protocol_name) if best_protocol_name else "No APY data", "tone": "good"},
             {"label": "Monthly profit", "value": _format_money(estimated_monthly_profit), "tone": "good" if estimated_monthly_profit > 0 else "warning"},
             {"label": "Simulated profit", "value": _format_money(simulated_profit)},
-            {"label": "Next rebalance", "value": next_rebalance["label"], "tone": next_rebalance["tone"]},
+            {"label": "Next scan", "value": next_scan["label"], "tone": next_scan["tone"]},
         ],
         "apys": [
             {"protocol": "Aave", "value": _format_percent(current_apys.get("aave")), "raw": current_apys.get("aave"), "is_best": best_protocol_name == "aave"},
@@ -543,15 +542,14 @@ def _yield_apy_chart_points(state: dict[str, Any], now: datetime) -> list[dict[s
     ]
 
 
-def _yield_next_rebalance(root: Path, state: dict[str, Any], paper_state: dict[str, Any], now: datetime) -> dict[str, Any]:
-    interval = _read_config_number(root / "config.yaml", "rebalance_interval_seconds", 300)
-    last_rebalance = _safe_float(state.get("last_rebalance_ts")) or _safe_float(paper_state.get("last_rebalance_ts")) or 0.0
-    if last_rebalance <= 0:
+def _yield_next_scan(root: Path, last_update: datetime | None, now: datetime) -> dict[str, Any]:
+    interval = _read_config_number(root / "config.yaml", "monitor_interval_seconds", 60)
+    if not last_update:
         return {"label": "Ready now", "seconds": 0, "tone": "good"}
-    remaining = int((last_rebalance + interval) - now.timestamp())
+    remaining = int((last_update.astimezone(timezone.utc).timestamp() + interval) - now.timestamp())
     if remaining <= 0:
         return {"label": "Ready now", "seconds": 0, "tone": "good"}
-    return {"label": _human_duration(remaining), "seconds": remaining, "tone": "warning" if remaining > 600 else "good"}
+    return {"label": _human_duration(remaining), "seconds": remaining, "tone": "warning" if remaining > 30 else "good"}
 
 
 def _read_config_number(path: Path, key: str, default: int) -> int:
@@ -581,6 +579,7 @@ def _asset_opportunities(stats: dict[str, Any]) -> list[dict[str, Any]]:
         score = _safe_float(item.get("opportunity_score")) or 0.0
         if not _is_asset_opportunity_sane(name, url, asking_price, real_value, profit):
             continue
+        profit_percent = (profit / asking_price * 100) if asking_price > 0 else 0.0
         opportunities.append(
             {
                 "name": name[:120],
@@ -592,9 +591,11 @@ def _asset_opportunities(stats: dict[str, Any]) -> list[dict[str, Any]]:
                 "asking_price": asking_price,
                 "real_value": real_value,
                 "profit_potential": profit,
+                "profit_percent": profit_percent,
                 "asking_label": _format_money(asking_price),
                 "value_label": _format_money(real_value),
                 "profit_label": _format_money(profit),
+                "profit_percent_label": f"{profit_percent:.1f}%",
                 "detected_at": item.get("detected_at"),
             }
         )
@@ -1084,25 +1085,25 @@ def _build_summary(cards: list[dict[str, Any]], now: datetime) -> list[dict[str,
     uptime_seconds = max(0, int((now - APP_STARTED_AT).total_seconds()))
     return [
         {
-            "label": "Simulated Balance",
+            "label": "Total Simulated Balance",
             "value": _format_money(total_balance),
             "caption": "Paper capital plus marked portfolio value",
             "tone": "good" if total_balance > 0 else "warning",
         },
         {
-            "label": "Opportunities Today",
+            "label": "Total Opportunities Today",
             "value": _format_int(total_opportunities),
             "caption": "Domains, assets and trends detected",
             "tone": "good" if total_opportunities else "warning",
         },
         {
-            "label": "Potential Profit",
+            "label": "Total Potential Profit",
             "value": _format_money(total_profit),
             "caption": "Modeled upside from active signals",
             "tone": "good" if total_profit > 0 else "warning",
         },
         {
-            "label": "System Uptime",
+            "label": "Uptime",
             "value": _human_duration(uptime_seconds),
             "caption": f"{running}/{len(cards)} bots online",
             "tone": "good" if running == len(cards) else "danger" if running == 0 else "warning",

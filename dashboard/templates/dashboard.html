@@ -287,6 +287,34 @@
       border-radius: 7px;
       background: rgba(5, 7, 11, .42);
     }
+    .apy-compare {
+      display: grid;
+      gap: 9px;
+    }
+    .apy-bar-row {
+      display: grid;
+      grid-template-columns: 92px minmax(0, 1fr) 76px;
+      gap: 10px;
+      align-items: center;
+      min-width: 0;
+    }
+    .apy-bar-track {
+      height: 12px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: rgba(148, 163, 184, .18);
+      border: 1px solid rgba(148, 163, 184, .12);
+    }
+    .apy-bar-fill {
+      width: 0;
+      height: 100%;
+      border-radius: inherit;
+      background: var(--blue);
+    }
+    .apy-bar-fill.best {
+      background: var(--green);
+      box-shadow: 0 0 16px rgba(34, 197, 94, .36);
+    }
     .apy-grid {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -377,7 +405,7 @@
     }
     .asset-row {
       display: grid;
-      grid-template-columns: minmax(0, 1.2fr) repeat(3, minmax(92px, .32fr)) 46px;
+      grid-template-columns: minmax(0, 1.25fr) repeat(3, minmax(86px, .28fr)) 68px;
       gap: 10px;
       align-items: center;
       padding: 11px;
@@ -385,10 +413,21 @@
       border-radius: 7px;
       background: rgba(5, 7, 11, .42);
     }
-    .asset-link {
+    .asset-link, .link-button {
       color: var(--blue);
       text-decoration: none;
       font-weight: 850;
+    }
+    .link-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 32px;
+      padding: 0 10px;
+      border: 1px solid rgba(56, 189, 248, .36);
+      border-radius: 6px;
+      background: rgba(56, 189, 248, .10);
+      white-space: nowrap;
     }
     .asset-label {
       color: var(--muted);
@@ -419,8 +458,9 @@
       justify-content: flex-end;
     }
     .platform {
-      width: 25px;
+      min-width: 25px;
       height: 25px;
+      padding: 0 8px;
       border-radius: 999px;
       display: inline-flex;
       align-items: center;
@@ -430,6 +470,13 @@
       background: rgba(15, 23, 36, .9);
       font-size: 10px;
       font-weight: 900;
+    }
+    .velocity-line {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-top: 7px;
     }
     .activity {
       margin-top: 14px;
@@ -488,7 +535,7 @@
         <div class="subtle">Last refresh: <span id="generated-at">{{ snapshot.generated_label }}</span></div>
       </div>
       <div class="actions">
-        <span class="pill">Auto refresh: 30s</span>
+        <span class="pill">Auto refresh: 2s</span>
         <span class="pill"><span id="running-count">{{ snapshot.running_count }}</span> running</span>
         <span class="pill"><span id="stopped-count">{{ snapshot.stopped_count }}</span> stopped</span>
         <form method="post" action="{{ url_for('logout') }}">
@@ -571,6 +618,22 @@
       '</svg>';
     }
 
+    function renderApyComparison(apys) {
+      apys = apys || [];
+      var max = apys.reduce(function(value, item) {
+        return Math.max(value, Number(item.raw || 0));
+      }, 0.0001);
+      return '<div class="apy-compare">' + apys.map(function(item) {
+        var raw = Number(item.raw || 0);
+        var width = Math.max(3, Math.min(100, (raw / max) * 100));
+        return '<div class="apy-bar-row">' +
+          '<span class="row-label">' + escapeHtml(item.protocol) + '</span>' +
+          '<div class="apy-bar-track"><div class="apy-bar-fill ' + (item.is_best ? 'best' : '') + '" style="width:' + width.toFixed(2) + '%"></div></div>' +
+          '<strong class="' + (item.is_best ? 'tone-good' : '') + '">' + escapeHtml(item.value) + '</strong>' +
+        '</div>';
+      }).join("") + '</div>';
+    }
+
     function renderYield(card) {
       var apys = (card.apys || []).map(function(item) {
         return '<div class="apy-row">' +
@@ -583,6 +646,8 @@
         '<div class="section"><div class="section-title"><span>APY History</span><span class="badge good">' +
         escapeHtml(card.best_protocol) + ' ' + escapeHtml(card.best_apy_label) + '</span></div>' +
         '<div class="chart-wrap">' + chartSvg(card.chart && card.chart.points) + '</div></div>' +
+        '<div class="section"><div class="section-title"><span>APY Comparison</span><span class="badge good">Best protocol</span></div>' +
+        renderApyComparison(card.apys) + '</div>' +
         '<div class="section"><div class="section-title"><span>Protocol APYs</span><span class="badge">' +
         escapeHtml(card.capital_label || "$140.00") + ' capital</span></div><div class="apy-grid">' + apys + '</div></div>';
     }
@@ -622,8 +687,8 @@
           escapeHtml(item.name) + '</a><div class="subtle">' + escapeHtml(item.marketplace) + ' | score ' + escapeHtml(item.score_label) + '</div></div>' +
           '<div><div class="asset-label">Asking</div><strong>' + escapeHtml(item.asking_label) + '</strong></div>' +
           '<div><div class="asset-label">Real Value</div><strong class="tone-good">' + escapeHtml(item.value_label) + '</strong></div>' +
-          '<div class="hide-mobile"><div class="asset-label">Profit</div><strong class="tone-good">' + escapeHtml(item.profit_label) + '</strong></div>' +
-          '<span class="badge ' + escapeHtml(item.tone) + '">' + escapeHtml(item.score_label) + '</span>' +
+          '<div><div class="asset-label">Profit %</div><strong class="tone-good">' + escapeHtml(item.profit_percent_label) + '</strong></div>' +
+          '<a class="link-button" href="' + escapeHtml(item.url) + '" target="_blank" rel="noopener noreferrer">Open</a>' +
         '</div>';
       }).join("") || '<div class="empty">No opportunities match this score filter</div>';
       return renderMetrics(card.metrics) +
@@ -641,13 +706,14 @@
     function renderTrend(card) {
       var rows = (card.top_trends || []).map(function(item) {
         var badges = (item.platform_badges || []).map(function(platform) {
-          return '<span class="platform" title="' + escapeHtml(platform.name) + '">' + escapeHtml(platform.label) + '</span>';
+          return '<span class="platform" title="' + escapeHtml(platform.name) + '">' + escapeHtml(platform.name) + '</span>';
         }).join("");
         return '<div class="trend-row">' +
           '<div class="split"><div class="truncate"><strong>' + escapeHtml(item.name) + '</strong><div class="subtle">' +
-          escapeHtml(item.velocity) + ' | signals ' + escapeHtml(item.signal_count || 0) + '</div></div><div class="platforms">' + badges + '</div></div>' +
+          'signals ' + escapeHtml(item.signal_count || 0) + '</div></div><div class="platforms">' + badges + '</div></div>' +
           '<div class="score-bar"><div class="score-fill ' + escapeHtml(item.tone) + '" style="width:' + escapeHtml(item.score_width) + '%"></div></div>' +
-          '<div class="split subtle"><span>Score</span><strong class="tone-' + escapeHtml(item.tone) + '">' + escapeHtml(item.score_label) + '</strong></div>' +
+          '<div class="velocity-line subtle"><span class="badge ' + escapeHtml(item.velocity_tone) + '">' + escapeHtml(item.velocity) + '</span>' +
+          '<span>Score <strong class="tone-' + escapeHtml(item.tone) + '">' + escapeHtml(item.score_label) + '</strong></span></div>' +
         '</div>';
       }).join("") || '<div class="empty">No trend rows available</div>';
       return renderMetrics(card.metrics) +
@@ -714,7 +780,7 @@
       originalRenderSnapshot(snapshot);
     };
     renderSnapshot(initialSnapshot);
-    setInterval(refresh, 30000);
+    setInterval(refresh, 2000);
   </script>
 </body>
 </html>
