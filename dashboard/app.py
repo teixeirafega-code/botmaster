@@ -2,8 +2,10 @@
 
 import atexit
 import csv
+import html
 import hmac
 import json
+import logging
 import os
 import re
 import sqlite3
@@ -11,10 +13,12 @@ import subprocess
 import sys
 import threading
 import time
-from collections import deque
+from collections import Counter, deque
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
+from urllib.request import urlopen
 
 from dotenv import load_dotenv
 from flask import Flask, jsonify, redirect, render_template, request, session, url_for
@@ -40,6 +44,9 @@ app.config.update(
     SESSION_COOKIE_SAMESITE="Lax",
 )
 APP_STARTED_AT = datetime.now(timezone.utc)
+logger = logging.getLogger(__name__)
+DASHBOARD_TELEGRAM_LAST_SENT: dict[str, float] = {}
+TELEGRAM_EVENT_COOLDOWN_SECONDS = 900
 
 
 BOT_CONFIG = {
@@ -114,6 +121,22 @@ def api_status():
     return jsonify(build_snapshot())
 
 
+@app.post("/api/domain-validation-report")
+def api_domain_validation_report():
+    if not _is_authenticated():
+        return jsonify({"error": "unauthorized"}), 401
+    report = _generate_domain_validation_report(_now())
+    return jsonify(
+        {
+            "ok": True,
+            "partial": report["partial"],
+            "json_path": report["json_path"],
+            "html_path": report["html_path"],
+            "summary": report["summary"],
+        }
+    )
+
+
 @app.post("/api/ingest")
 def api_ingest():
     token = os.getenv("BOTMASTER_STATUS_TOKEN")
@@ -146,6 +169,7 @@ def build_snapshot() -> dict[str, Any]:
         _trend_card(process_lines, now),
     ]
     cards = _merge_shared_statuses(cards, shared_statuses, now)
+    _notify_domain_offline_if_needed(cards)
     running = sum(1 for card in cards if card["status"] == "RUNNING")
     return {
         "generated_at": now.isoformat(),
@@ -153,6 +177,7 @@ def build_snapshot() -> dict[str, Any]:
         "running_count": running,
         "stopped_count": len(cards) - running,
         "summary": _build_summary(cards, now),
+        "domain_safety": _domain_safety_panel(now, shared_statuses),
         "activity_feed": _build_activity_feed(cards, shared_statuses, now),
         "cards": cards,
     }
@@ -317,6 +342,653 @@ def _domain_card(process_lines: list[str], now: datetime) -> dict[str, Any]:
         ],
         "details": [],
     }
+
+
+def _domain_safety_panel(now: datetime, shared_statuses: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    root = _bot_root("domain")
+    pending_path = root / "data/pending_approvals.json"
+    attempts_path = root / "data/purchase_attempts.json"
+    log_path = root / "logs/domain_hunter_bot.log"
+    domains_path = root / "data/domains.json"
+
+    approvals = _approval_entries(_read_json(pending_path, default={}))
+    attempts = _purchase_attempt_entries(_read_json(attempts_path, default=[]))
+    logs = _json_log_tail(log_path, 6000)
+    domains_state = _read_json(domains_path, default=[])
+    domain_metrics = shared_statuses.get("domain", {}).get("metrics", {})
+    metrics = domain_metrics if isinstance(domain_metrics, dict) else {}
+
+    decisions = _domain_decision_rows(logs)
+    reason_counts = _rejection_reason_counts(decisions, metrics)
+    blocked_counts = _blocked_counts(reason_counts)
+    pending = [item for item in approvals if not item["approved"]]
+    approved = [item for item in approvals if item["approved"]]
+    dry_run_attempts = [item for item in attempts if item["blocked_by_dry_run"]]
+    real_attempt_domains = {item["domain"] for item in attempts if item["domain"] and not item["blocked_by_dry_run"]}
+    real_purchase_domains, sold_domains = _real_domain_sets(domains_state, logs)
+    real_purchase_domains.update(real_attempt_domains)
+
+    reviewed_domains = {
+        *(item["domain"] for item in approvals if item["domain"]),
+        *(item["domain"] for item in attempts if item["domain"]),
+        *(item["domain"] for item in decisions if item["domain"]),
+        *real_purchase_domains,
+        *sold_domains,
+    }
+    opportunities_found = max(
+        len({item["domain"] for item in decisions if item["domain"]}),
+        int(_safe_float(metrics.get("opportunities_found")) or 0),
+        len(reviewed_domains),
+    )
+    approved_domains = {item["domain"] for item in approved if item["domain"]}
+    risky_approved = approved_domains.intersection(_blocked_domain_set(decisions, {"trademark", "low_liquidity"}))
+    approval_quality = _approval_quality_score(len(approved_domains), len(risky_approved))
+    approval_rate = len(approved) / max(1, len(approved) + len(pending))
+    capital_protected = _capital_protected(decisions, dry_run_attempts)
+    safe_mode = _domain_safety_bool(root, metrics, "safe_mode", "SAFE_MODE", "safe_mode", True)
+    dry_run_purchases = _domain_safety_bool(root, metrics, "dry_run_purchases", "DRY_RUN_PURCHASES", "dry_run_purchases", True)
+
+    return {
+        "title": "Domain Hunter Safety",
+        "safe_mode": safe_mode,
+        "safe_mode_label": "ON" if safe_mode else "OFF",
+        "safe_mode_tone": "good" if safe_mode else "danger",
+        "dry_run_purchases": dry_run_purchases,
+        "dry_run_purchases_label": "ON" if dry_run_purchases else "OFF",
+        "dry_run_purchases_tone": "good" if dry_run_purchases else "danger",
+        "counts": {
+            "pending_approvals": len(pending),
+            "dry_run_purchase_attempts": len(dry_run_attempts),
+            "blocked_by_trademark": blocked_counts["trademark"],
+            "blocked_by_low_liquidity": blocked_counts["low_liquidity"],
+            "blocked_by_budget": blocked_counts["budget"],
+            "blocked_by_cooldown": blocked_counts["cooldown"],
+            "manually_approved_domains": len(approved),
+            "real_purchases": len(real_purchase_domains),
+        },
+        "flow": {
+            "opportunities_found": opportunities_found,
+            "domains_approved": len(approved_domains),
+            "domains_purchased": len(real_purchase_domains),
+            "domains_sold": len(sold_domains),
+        },
+        "kpis": [
+            {
+                "label": "Approval Quality Score",
+                "value": f"{approval_quality:.0f}%",
+                "tone": "good" if approval_quality >= 85 else "warning" if approval_quality >= 60 else "danger",
+            },
+            {
+                "label": "Trademark Risk Avoided",
+                "value": _format_int(blocked_counts["trademark"]),
+                "tone": "good" if blocked_counts["trademark"] else "neutral",
+            },
+            {
+                "label": "Capital Protected",
+                "value": _format_money(capital_protected),
+                "tone": "good" if capital_protected else "neutral",
+            },
+            {
+                "label": "Domains Reviewed",
+                "value": _format_int(len(reviewed_domains)),
+                "tone": "good" if reviewed_domains else "warning",
+            },
+        ],
+        "charts": {
+            "rejection_reasons": _rejection_chart(reason_counts),
+            "pending_over_time": _pending_over_time(pending, now),
+            "approval_rate": [
+                {"label": "Approved", "value": len(approved), "tone": "good"},
+                {"label": "Pending", "value": len(pending), "tone": "warning"},
+                {"label": "Rate", "value": round(approval_rate * 100, 2), "tone": "good" if approval_rate >= 0.5 else "warning"},
+            ],
+        },
+    }
+
+
+def _generate_domain_validation_report(now: datetime) -> dict[str, Any]:
+    root = _bot_root("domain")
+    output_dir = root / "data"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    json_path = output_dir / "domain_validation_report.json"
+    html_path = output_dir / "domain_validation_report.html"
+
+    pending_path = root / "data/pending_approvals.json"
+    attempts_path = root / "data/purchase_attempts.json"
+    log_path = root / "logs/domain_hunter_bot.log"
+    domains_path = root / "data/domains.json"
+
+    approvals = _approval_entries(_read_json(pending_path, default={}))
+    attempts = _purchase_attempt_entries(_read_json(attempts_path, default=[]))
+    logs = _json_log_tail(log_path, 8000)
+    decisions = _domain_decision_rows(logs)
+    domains_state = _read_json(domains_path, default=[])
+    cutoff = now - timedelta(days=7)
+
+    window_approvals = [item for item in approvals if _is_in_report_window(item.get("created_at") or item.get("updated_at"), cutoff, now)]
+    window_attempts = [item for item in attempts if _is_in_report_window(item.get("timestamp"), cutoff, now)]
+    window_decisions = [item for item in decisions if _is_in_report_window(item.get("timestamp"), cutoff, now)]
+    window_logs = [item for item in logs if _is_in_report_window(item.get("timestamp"), cutoff, now)]
+
+    reason_counts = _rejection_reason_counts(window_decisions, {})
+    blocked_counts = _blocked_counts(reason_counts)
+    pending = [item for item in window_approvals if not item["approved"]]
+    manual_approvals = [item for item in window_approvals if item["approved"]]
+    dry_run_attempts = [item for item in window_attempts if item["blocked_by_dry_run"]]
+    real_purchase_domains, sold_domains = _real_domain_sets_in_window(domains_state, window_logs, window_attempts, cutoff, now)
+    opportunities_found = _opportunities_in_window(window_logs, window_decisions)
+    pending_reviews = [
+        _pending_validation_review(item, now, root)
+        for item in sorted((entry for entry in approvals if not entry["approved"]), key=lambda row: str(row.get("domain")))
+    ]
+
+    timestamps = _validation_report_timestamps(approvals, attempts, decisions, logs, domains_state)
+    oldest_timestamp = min(timestamps) if timestamps else None
+    partial = oldest_timestamp is None or oldest_timestamp > cutoff
+    observed_start = oldest_timestamp if oldest_timestamp and oldest_timestamp > cutoff else cutoff
+    observed_days = max(0.0, (now - observed_start).total_seconds() / 86_400) if oldest_timestamp else 0.0
+
+    summary = {
+        "opportunities_found": len(opportunities_found),
+        "pending_approvals": len(pending),
+        "dry_run_purchase_attempts": len(dry_run_attempts),
+        "trademark_blocks": blocked_counts["trademark"],
+        "liquidity_blocks": blocked_counts["low_liquidity"],
+        "budget_cooldown_blocks": blocked_counts["budget"] + blocked_counts["cooldown"],
+        "manual_approvals": len(manual_approvals),
+        "real_purchases": len(real_purchase_domains),
+        "sold_domains": len(sold_domains),
+    }
+    report = {
+        "report_name": "Domain Hunter 7-Day Validation Report",
+        "generated_at": now.isoformat(),
+        "period_start": cutoff.isoformat(),
+        "period_end": now.isoformat(),
+        "requested_days": 7,
+        "observed_days": round(observed_days, 2),
+        "partial": partial,
+        "partial_reason": "Fewer than 7 days of timestamped Domain Hunter data were found." if partial else "",
+        "safety_rules": {
+            "never_triggers_real_purchases": True,
+            "dry_run_attempts_counted_as_real_purchases": False,
+            "pending_approvals_counted_as_owned_domains": False,
+        },
+        "summary": summary,
+        "pending_domain_reviews": pending_reviews,
+        "artifacts": {
+            "json": str(json_path),
+            "html": str(html_path),
+        },
+        "json_path": str(json_path),
+        "html_path": str(html_path),
+    }
+    json_path.write_text(json.dumps(report, indent=2, ensure_ascii=True, sort_keys=True), encoding="utf-8")
+    html_path.write_text(_domain_validation_report_html(report), encoding="utf-8")
+    return report
+
+
+def _pending_validation_review(item: dict[str, Any], now: datetime, root: Path) -> dict[str, Any]:
+    created_at = _parse_dt(item.get("created_at")) or _parse_dt(item.get("updated_at")) or now
+    age_days = max(0.0, (now - created_at.astimezone(timezone.utc)).total_seconds() / 86_400)
+    cooldown_minutes = _domain_risk_number(root, "cooldown_minutes_between_buys", "COOLDOWN_MINUTES_BETWEEN_BUYS", 120.0)
+    min_score = _domain_risk_number(root, "min_score_to_buy", "MIN_SCORE_TO_BUY", 88.0)
+    min_expected_value = _domain_risk_number(root, "min_expected_value", "MIN_EXPECTED_VALUE", 250.0)
+    score = _safe_float(item.get("score"))
+    expected_value = _safe_float(item.get("expected_value"))
+    liquidity_grade = str(item.get("liquidity_grade") or "").upper()
+    trademark_risk = item.get("trademark_risk") is True
+    reviewed_after_cooldown = age_days * 24 * 60 >= cooldown_minutes
+    score_ok = score is not None and score >= min_score
+    value_ok = expected_value is not None and expected_value >= min_expected_value
+    liquidity_ok = liquidity_grade in {"A", "B"}
+    still_worth_buying = bool(score_ok and value_ok and liquidity_ok and not trademark_risk)
+
+    if trademark_risk:
+        final_decision = "reject"
+        reviewer_notes = "Auto-review: trademark risk remains present after the validation window."
+    elif not liquidity_ok or not value_ok or not score_ok:
+        final_decision = "reject"
+        reviewer_notes = "Auto-review: score, liquidity, or expected value no longer clears the buy policy."
+    elif reviewed_after_cooldown and still_worth_buying:
+        final_decision = "approve"
+        reviewer_notes = "Auto-review: still clears score, liquidity, expected value, and cooldown checks. Manual approval is still required."
+    else:
+        final_decision = "keep watching"
+        reviewer_notes = "Auto-review: candidate still needs more cooldown/observation time before a decision."
+
+    return {
+        "domain": item["domain"],
+        "review_question": "Would I still approve this after 7 days?",
+        "created_at": created_at.isoformat(),
+        "age_days": round(age_days, 2),
+        "score": score,
+        "expected_value": expected_value,
+        "sale_probability": _safe_float(item.get("sale_probability")),
+        "liquidity_grade": liquidity_grade or "unknown",
+        "trademark_risk": trademark_risk,
+        "reviewed_after_cooldown": reviewed_after_cooldown,
+        "still_worth_buying": still_worth_buying,
+        "reviewer_notes": reviewer_notes,
+        "final_decision": final_decision,
+    }
+
+
+def _domain_validation_report_html(report: dict[str, Any]) -> str:
+    summary = report["summary"]
+    reviews = report.get("pending_domain_reviews", [])
+    partial_badge = "PARTIAL" if report.get("partial") else "FULL 7 DAYS"
+    rows = "\n".join(
+        "<tr>"
+        f"<td>{html.escape(str(item.get('domain', '')))}</td>"
+        f"<td>{html.escape(str(item.get('age_days', '')))}</td>"
+        f"<td>{html.escape(str(item.get('liquidity_grade', '')))}</td>"
+        f"<td>{html.escape(str(item.get('expected_value', '')))}</td>"
+        f"<td>{html.escape(str(item.get('reviewed_after_cooldown', '')))}</td>"
+        f"<td>{html.escape(str(item.get('still_worth_buying', '')))}</td>"
+        f"<td>{html.escape(str(item.get('final_decision', '')))}</td>"
+        f"<td>{html.escape(str(item.get('reviewer_notes', '')))}</td>"
+        "</tr>"
+        for item in reviews
+    ) or '<tr><td colspan="8">No pending domains to review.</td></tr>'
+    summary_cards = "\n".join(
+        f"<div class='card'><span>{html.escape(_title(key))}</span><strong>{html.escape(str(value))}</strong></div>"
+        for key, value in summary.items()
+    )
+    partial_note = (
+        f"<p class='warning'>{html.escape(str(report.get('partial_reason')))}</p>"
+        if report.get("partial")
+        else ""
+    )
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Domain Hunter 7-Day Validation Report</title>
+  <style>
+    body {{ margin:0; background:#07101b; color:#e5eefb; font-family: Inter, Arial, sans-serif; }}
+    main {{ max-width:1180px; margin:0 auto; padding:28px 18px 44px; }}
+    h1 {{ margin:0 0 8px; font-size:28px; }}
+    .muted {{ color:#93a4ba; }}
+    .badge {{ display:inline-block; padding:6px 10px; border-radius:999px; background:#102033; border:1px solid #26364b; font-weight:800; }}
+    .warning {{ color:#fbbf24; }}
+    .grid {{ display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:10px; margin:20px 0; }}
+    .card {{ border:1px solid #26364b; border-radius:8px; padding:12px; background:#0d1726; }}
+    .card span {{ display:block; color:#93a4ba; font-size:12px; text-transform:uppercase; }}
+    .card strong {{ display:block; margin-top:7px; font-size:24px; }}
+    table {{ width:100%; border-collapse:collapse; margin-top:14px; background:#0d1726; border-radius:8px; overflow:hidden; }}
+    th, td {{ border-bottom:1px solid #26364b; padding:10px; text-align:left; vertical-align:top; }}
+    th {{ color:#93a4ba; font-size:12px; text-transform:uppercase; }}
+    @media (max-width: 780px) {{ .grid {{ grid-template-columns:1fr; }} table {{ font-size:12px; }} }}
+  </style>
+</head>
+<body>
+  <main>
+    <span class="badge">{html.escape(partial_badge)}</span>
+    <h1>Domain Hunter 7-Day Validation Report</h1>
+    <p class="muted">Generated at {html.escape(str(report.get('generated_at')))}. Period: {html.escape(str(report.get('period_start')))} to {html.escape(str(report.get('period_end')))}.</p>
+    {partial_note}
+    <p class="muted">This report never triggers real purchases. Dry-run attempts are not counted as real purchases, and pending approvals are not owned domains.</p>
+    <section class="grid">{summary_cards}</section>
+    <h2>Pending Domain Review</h2>
+    <p class="muted">Review question for each pending domain: Would I still approve this after 7 days?</p>
+    <table>
+      <thead>
+        <tr>
+          <th>Domain</th>
+          <th>Age Days</th>
+          <th>Liquidity</th>
+          <th>Expected Value</th>
+          <th>After Cooldown</th>
+          <th>Still Worth Buying</th>
+          <th>Final Decision</th>
+          <th>Reviewer Notes</th>
+        </tr>
+      </thead>
+      <tbody>{rows}</tbody>
+    </table>
+  </main>
+</body>
+</html>
+"""
+
+
+def _is_in_report_window(value: Any, cutoff: datetime, now: datetime) -> bool:
+    parsed = _parse_dt(value)
+    if not parsed:
+        return False
+    parsed = parsed.astimezone(timezone.utc)
+    return cutoff <= parsed <= now
+
+
+def _opportunities_in_window(logs: list[dict[str, Any]], decisions: list[dict[str, Any]]) -> set[str]:
+    domains = {item["domain"] for item in decisions if item.get("domain")}
+    for row in logs:
+        event = str(row.get("event_name") or "").upper()
+        score = _safe_float(row.get("score"))
+        domain = str(row.get("domain") or "").strip().lower()
+        if domain and event == "DOMAIN_SCORED" and score is not None and score >= 70:
+            domains.add(domain)
+    return domains
+
+
+def _real_domain_sets_in_window(
+    domains_state: Any,
+    logs: list[dict[str, Any]],
+    attempts: list[dict[str, Any]],
+    cutoff: datetime,
+    now: datetime,
+) -> tuple[set[str], set[str]]:
+    purchased, sold = _real_domain_sets([], logs)
+    for item in attempts:
+        if item.get("domain") and not item.get("blocked_by_dry_run") and _is_in_report_window(item.get("timestamp"), cutoff, now):
+            purchased.add(str(item["domain"]))
+    if isinstance(domains_state, list):
+        for item in domains_state:
+            if not isinstance(item, dict):
+                continue
+            domain = str(item.get("domain") or item.get("name") or "").strip().lower()
+            status = str(item.get("status") or "").lower()
+            registered_at = item.get("registered_at") or item.get("listed_at") or item.get("updated_at")
+            sold_at = item.get("sold_at") or item.get("updated_at")
+            if domain and status in {"registered", "listed", "sold"} and _is_in_report_window(registered_at, cutoff, now):
+                purchased.add(domain)
+            if domain and status == "sold" and _is_in_report_window(sold_at, cutoff, now):
+                sold.add(domain)
+    return purchased, sold
+
+
+def _validation_report_timestamps(
+    approvals: list[dict[str, Any]],
+    attempts: list[dict[str, Any]],
+    decisions: list[dict[str, Any]],
+    logs: list[dict[str, Any]],
+    domains_state: Any,
+) -> list[datetime]:
+    timestamps: list[datetime] = []
+    for item in approvals:
+        parsed = _parse_dt(item.get("created_at") or item.get("updated_at"))
+        if parsed:
+            timestamps.append(parsed)
+    for item in attempts:
+        parsed = _parse_dt(item.get("timestamp"))
+        if parsed:
+            timestamps.append(parsed)
+    for item in decisions:
+        parsed = _parse_dt(item.get("timestamp"))
+        if parsed:
+            timestamps.append(parsed)
+    for item in logs:
+        parsed = _parse_dt(item.get("timestamp"))
+        if parsed:
+            timestamps.append(parsed)
+    if isinstance(domains_state, list):
+        for item in domains_state:
+            if not isinstance(item, dict):
+                continue
+            for key in ("registered_at", "listed_at", "sold_at", "updated_at"):
+                parsed = _parse_dt(item.get(key))
+                if parsed:
+                    timestamps.append(parsed)
+    return [item.astimezone(timezone.utc) for item in timestamps]
+
+
+def _domain_risk_number(root: Path, key: str, env_key: str, default: float) -> float:
+    env_value = os.getenv(env_key)
+    if env_value is None:
+        env_value = _read_env_value(root / ".env", env_key)
+    value = _safe_float(env_value)
+    if value is not None:
+        return value
+    config_value = _read_risk_config_number(root / "config.yaml", key)
+    return default if config_value is None else config_value
+
+
+def _read_risk_config_number(path: Path, key: str) -> float | None:
+    if not path.exists():
+        return None
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    risk_match = re.search(r"^risk:\s*$([\s\S]*?)(?=^[A-Za-z_][\w-]*:\s*$|\Z)", text, re.MULTILINE)
+    risk_text = risk_match.group(1) if risk_match else text
+    match = re.search(rf"^\s+{re.escape(key)}\s*:\s*([-+]?[0-9]*\.?[0-9]+)", risk_text, re.MULTILINE)
+    return _safe_float(match.group(1)) if match else None
+
+
+def _approval_entries(raw: Any) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    if isinstance(raw, dict):
+        iterable = raw.items()
+    elif isinstance(raw, list):
+        iterable = [(None, item) for item in raw]
+    else:
+        iterable = []
+    for key, value in iterable:
+        if not isinstance(value, dict):
+            continue
+        domain = str(value.get("domain") or key or "").strip().lower()
+        if not domain:
+            continue
+        entries.append(
+            {
+                "domain": domain,
+                "approved": value.get("approved") is True,
+                "score": _safe_float(value.get("score")),
+                "price": _safe_float(value.get("price")),
+                "expected_value": _safe_float(value.get("expected_value")),
+                "sale_probability": _safe_float(value.get("sale_probability")),
+                "liquidity_grade": str(value.get("liquidity_grade") or "").strip().upper(),
+                "trademark_risk": value.get("trademark_risk") is True,
+                "created_at": value.get("created_at") or value.get("updated_at") or value.get("timestamp"),
+                "updated_at": value.get("updated_at") or value.get("created_at") or value.get("timestamp"),
+            }
+        )
+    return entries
+
+
+def _purchase_attempt_entries(raw: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw, list):
+        return []
+    entries = []
+    for value in raw:
+        if not isinstance(value, dict):
+            continue
+        domain = str(value.get("domain") or "").strip().lower()
+        entries.append(
+            {
+                "domain": domain,
+                "price": _safe_float(value.get("price")) or 0.0,
+                "blocked_by_dry_run": value.get("blocked_by_dry_run") is True,
+                "timestamp": value.get("timestamp"),
+            }
+        )
+    return entries
+
+
+def _domain_decision_rows(logs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    decisions: list[dict[str, Any]] = []
+    for row in logs:
+        event = str(row.get("event_name") or "").lower()
+        decision = str(row.get("decision") or "").lower()
+        reason = str(row.get("decision_reason") or row.get("reason") or "").strip().lower()
+        if event != "acquisition_decision" and not reason.startswith(("reject:", "watchlist:", "buy:")):
+            continue
+        if ":" in reason and reason.split(":", 1)[0] in {"reject", "watchlist", "buy"}:
+            decision, reason = reason.split(":", 1)
+        decisions.append(
+            {
+                "domain": str(row.get("domain") or "").strip().lower(),
+                "decision": decision,
+                "reason": reason,
+                "price": _safe_float(row.get("price")) or 0.0,
+                "timestamp": row.get("timestamp"),
+            }
+        )
+    return decisions
+
+
+def _rejection_reason_counts(decisions: list[dict[str, Any]], metrics: dict[str, Any]) -> Counter[str]:
+    counts: Counter[str] = Counter()
+    for item in decisions:
+        if item["decision"] == "reject" and item["reason"]:
+            counts[item["reason"]] += 1
+    policy_counters = metrics.get("policy_counters")
+    if isinstance(policy_counters, dict):
+        for key, value in policy_counters.items():
+            key_text = str(key)
+            if not key_text.startswith("reason:"):
+                continue
+            reason = key_text.split(":", 1)[1]
+            if _safety_rejection_category(reason) == "other":
+                continue
+            counts[reason] = max(counts[reason], int(_safe_float(value) or 0))
+    return counts
+
+
+def _blocked_counts(reason_counts: Counter[str]) -> Counter[str]:
+    blocked: Counter[str] = Counter()
+    for reason, count in reason_counts.items():
+        category = _safety_rejection_category(reason)
+        if category != "other":
+            blocked[category] += count
+    return blocked
+
+
+def _blocked_domain_set(decisions: list[dict[str, Any]], categories: set[str]) -> set[str]:
+    domains = set()
+    for item in decisions:
+        if item["decision"] == "reject" and _safety_rejection_category(item["reason"]) in categories and item["domain"]:
+            domains.add(item["domain"])
+    return domains
+
+
+def _safety_rejection_category(reason: str) -> str:
+    text = str(reason).lower()
+    if "trademark" in text or "brand" in text:
+        return "trademark"
+    if "liquidity" in text or "expected_value" in text or "resale_probability" in text:
+        return "low_liquidity"
+    if any(token in text for token in ("budget", "spend", "price_above", "max_buys", "max_portfolio", "capital_exposure")):
+        return "budget"
+    if "cooldown" in text:
+        return "cooldown"
+    return "other"
+
+
+def _real_domain_sets(domains_state: Any, logs: list[dict[str, Any]]) -> tuple[set[str], set[str]]:
+    purchased: set[str] = set()
+    sold: set[str] = set()
+    if isinstance(domains_state, list):
+        for item in domains_state:
+            if not isinstance(item, dict):
+                continue
+            domain = str(item.get("domain") or item.get("name") or "").strip().lower()
+            status = str(item.get("status") or "").lower()
+            if domain and status in {"registered", "listed", "sold"}:
+                purchased.add(domain)
+            if domain and status == "sold":
+                sold.add(domain)
+    for row in logs:
+        event = str(row.get("event_name") or "").lower()
+        domain = str(row.get("domain") or "").strip().lower()
+        if not domain:
+            continue
+        if event == "domain_registered":
+            purchased.add(domain)
+        if event in {"domain_sold", "sale", "sale_recorded"} or "sold" in event:
+            sold.add(domain)
+            purchased.add(domain)
+    return purchased, sold
+
+
+def _capital_protected(decisions: list[dict[str, Any]], dry_run_attempts: list[dict[str, Any]]) -> float:
+    total = sum(item["price"] for item in dry_run_attempts)
+    for item in decisions:
+        if item["decision"] == "reject" and _safety_rejection_category(item["reason"]) != "other":
+            total += _safe_float(item.get("price")) or 0.0
+    return total
+
+
+def _approval_quality_score(approved_count: int, risky_approved_count: int) -> float:
+    if approved_count <= 0:
+        return 0.0
+    return max(0.0, 100.0 - (risky_approved_count / approved_count * 100.0))
+
+
+def _rejection_chart(reason_counts: Counter[str]) -> list[dict[str, Any]]:
+    rows = []
+    for reason, value in reason_counts.most_common(8):
+        category = _safety_rejection_category(reason)
+        rows.append({"label": _title(reason), "value": value, "tone": _safety_tone(category)})
+    return rows
+
+
+def _pending_over_time(pending: list[dict[str, Any]], now: datetime) -> list[dict[str, Any]]:
+    buckets = {
+        (now.astimezone().date() - timedelta(days=offset)).isoformat(): 0
+        for offset in range(13, -1, -1)
+    }
+    for item in pending:
+        parsed = _parse_dt(item.get("created_at")) or now
+        key = parsed.astimezone().date().isoformat()
+        if key in buckets:
+            buckets[key] += 1
+    return [{"label": key[5:], "value": value, "tone": "warning" if value else "neutral"} for key, value in buckets.items()]
+
+
+def _safety_tone(category: str) -> str:
+    if category in {"trademark", "budget"}:
+        return "danger"
+    if category in {"low_liquidity", "cooldown"}:
+        return "warning"
+    return "neutral"
+
+
+def _domain_safety_bool(root: Path, metrics: dict[str, Any], metric_key: str, env_key: str, config_key: str, default: bool) -> bool:
+    if metric_key in metrics:
+        return _coerce_bool(metrics.get(metric_key), default)
+    env_value = os.getenv(env_key)
+    if env_value is None:
+        env_value = _read_env_value(root / ".env", env_key)
+    if env_value is not None:
+        return _coerce_bool(env_value, default)
+    config_value = _read_config_bool(root / "config.yaml", config_key)
+    return default if config_value is None else config_value
+
+
+def _read_env_value(path: Path, key: str) -> str | None:
+    if not path.exists():
+        return None
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    match = re.search(rf"^\s*{re.escape(key)}\s*=\s*(.+?)\s*$", text, re.MULTILINE)
+    return match.group(1).strip().strip('"').strip("'") if match else None
+
+
+def _read_config_bool(path: Path, key: str) -> bool | None:
+    if not path.exists():
+        return None
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    match = re.search(rf"^\s*{re.escape(key)}\s*:\s*(true|false|yes|no|on|off|1|0)\s*$", text, re.IGNORECASE | re.MULTILINE)
+    return _coerce_bool(match.group(1), False) if match else None
+
+
+def _coerce_bool(value: Any, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return default
 
 
 def _asset_card(process_lines: list[str], now: datetime) -> dict[str, Any]:
@@ -1215,6 +1887,68 @@ def _human_duration(seconds: float | int) -> str:
     return f"{seconds}s"
 
 
+def _notify_domain_offline_if_needed(cards: list[dict[str, Any]]) -> None:
+    domain_card = next((card for card in cards if card.get("id") == "domain"), None)
+    if not domain_card or domain_card.get("status") == "RUNNING":
+        return
+    _dashboard_telegram_alert(
+        "bot_offline_detection",
+        "Bot offline detection\n"
+        "Bot: Domain Hunter\n"
+        f"Status: {domain_card.get('status', 'UNKNOWN')}\n"
+        f"Last update: {domain_card.get('last_update', 'Unknown')}",
+    )
+
+
+def _dashboard_telegram_alert(event_type: str, message: str, *, disable_notification: bool = False) -> bool:
+    if not _dashboard_telegram_enabled():
+        return False
+    token = _dashboard_telegram_setting("TELEGRAM_BOT_TOKEN")
+    chat_id = _dashboard_telegram_setting("TELEGRAM_CHAT_ID")
+    if not token or not chat_id:
+        return False
+
+    now = time.monotonic()
+    last_sent = DASHBOARD_TELEGRAM_LAST_SENT.get(event_type)
+    if last_sent and now - last_sent < TELEGRAM_EVENT_COOLDOWN_SECONDS:
+        return False
+    DASHBOARD_TELEGRAM_LAST_SENT[event_type] = now
+
+    payload = urlencode(
+        {
+            "chat_id": chat_id,
+            "text": message,
+            "disable_web_page_preview": "true",
+            "disable_notification": "true" if disable_notification else "false",
+        }
+    ).encode("utf-8")
+    try:
+        urlopen(f"https://api.telegram.org/bot{token}/sendMessage", data=payload, timeout=10).read()
+        return True
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Dashboard Telegram notification failed: %s", _dashboard_safe_error(exc, token))
+        return False
+
+
+def _dashboard_telegram_enabled() -> bool:
+    return _coerce_bool(_dashboard_telegram_setting("TELEGRAM_ENABLED"), False)
+
+
+def _dashboard_telegram_setting(key: str) -> str | None:
+    value = os.getenv(key)
+    if value is not None:
+        return value
+    return _read_env_value(_bot_root("domain") / ".env", key)
+
+
+def _dashboard_safe_error(error: Exception | str, *secrets: str | None) -> str:
+    message = str(error)
+    for secret in secrets:
+        if secret:
+            message = message.replace(secret, "[redacted]")
+    return message
+
+
 EMBEDDED_BOTS = {
     "yield": {
         "name": "Yield Optimizer",
@@ -1290,6 +2024,14 @@ def _embedded_bot_env(bot_id: str) -> dict[str, str]:
 def _bot_supervisor(bot_id: str, name: str, root: Path) -> None:
     if not root.exists():
         _write_shared_status({"bot_id": bot_id, "bot_name": name, "status": "ERROR", "error": f"Bot directory not found: {root}"})
+        if bot_id == "domain":
+            _dashboard_telegram_alert(
+                "bot_offline_detection",
+                "Bot offline detection\n"
+                f"Bot: {name}\n"
+                "Status: ERROR\n"
+                f"Reason: Bot directory not found: {root}",
+            )
         return
 
     heartbeat_seconds = max(15, int(os.getenv("BOTMASTER_HEARTBEAT_SECONDS", "30")))
@@ -1358,6 +2100,14 @@ def _bot_supervisor(bot_id: str, name: str, root: Path) -> None:
             restart_count += 1
             error = f"Bot process exited with code {exit_code}; restarting"
             print(f"[botmaster] {name} {error}", flush=True)
+            if bot_id == "domain":
+                _dashboard_telegram_alert(
+                    "bot_offline_detection",
+                    "Bot offline detection\n"
+                    f"Bot: {name}\n"
+                    f"Status: ERROR\n"
+                    f"Reason: {error}",
+                )
             _write_shared_status(
                 {
                     "bot_id": bot_id,
@@ -1375,6 +2125,13 @@ def _bot_supervisor(bot_id: str, name: str, root: Path) -> None:
         except Exception as exc:  # noqa: BLE001
             restart_count += 1
             print(f"[botmaster] {name} supervisor error: {exc}", flush=True)
+            if bot_id == "domain":
+                _dashboard_telegram_alert(
+                    "critical_exception",
+                    "Critical exception\n"
+                    f"Bot: {name}\n"
+                    f"Error: {exc}",
+                )
             _write_shared_status(
                 {
                     "bot_id": bot_id,

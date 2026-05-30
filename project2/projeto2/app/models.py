@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 class DomainStatus(StrEnum):
     MONITORED = "monitored"
+    WATCHLIST = "watchlist"
     REGISTERED = "registered"
     LISTED = "listed"
     SOLD = "sold"

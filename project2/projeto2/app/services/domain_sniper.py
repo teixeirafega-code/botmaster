@@ -73,9 +73,12 @@ class DomainSniper:
         if not target_time:
             return
         valuation = await self.manager.scorer.value(candidate)
-        decision = self.manager.roi_optimizer.decide(valuation)
-        capital_allowed, _ = self.manager.capital_allocator.allowed(valuation, await self.manager.load_state())
-        if not (candidate.score >= self.manager.settings.scoring.registration_threshold and decision.approved and capital_allowed):
+        acquisition_decision = await self.manager.acquisition_policy.evaluate(
+            candidate,
+            valuation,
+            await self.manager.load_state(),
+        )
+        if not acquisition_decision.should_buy:
             return
         price = self.manager.pricing_engine.smart_price(candidate, valuation)
         await self.dropcatch.place_backorder(candidate.name, max_bid=valuation.recommended_purchase_price)
@@ -84,10 +87,16 @@ class DomainSniper:
     async def attempt_registration_at_expiry(self, candidate: DomainCandidate, target_time: datetime, list_price: int) -> SniperAttempt:
         target_time = target_time.astimezone(UTC)
         await self._sleep_until(target_time)
+        valuation = await self.manager.scorer.value(candidate)
+        acquisition_decision = await self.manager.acquisition_policy.evaluate(candidate, valuation, await self.manager.load_state())
+        if not acquisition_decision.should_buy:
+            return SniperAttempt(candidate.name, target_time, 0, False, error=acquisition_decision.reason)
+        if not await self.manager.risk_manager.validate_candidate(candidate):
+            return SniperAttempt(candidate.name, target_time, 0, False, error="risk_manager_rejected")
         last_error = ""
         for attempt in range(1, self.retry_attempts + 1):
             try:
-                result = await self.manager._register_and_list(candidate, list_price)
+                result = await self.manager._register_and_list(candidate, list_price, acquisition_decision)
                 return SniperAttempt(candidate.name, target_time, attempt, True, result=result)
             except Exception as exc:
                 last_error = str(exc)

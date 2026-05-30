@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from app.config.settings import Settings
 from app.core.context import get_correlation_id, get_operation_id
 from app.db.postgres import DomainRepository
+from app.economics.trademark import detect_trademark_risk
 from app.models import DomainCandidate
 from app.services.telegram_notifier import TelegramNotifier
 
@@ -49,6 +50,8 @@ class RiskManager:
             return "emergency_stop_enabled"
         if not DOMAIN_RE.fullmatch(candidate.name):
             return "malformed_domain"
+        if detect_trademark_risk(candidate.name, self.settings.risk.famous_brands).risky:
+            return "trademark_risk"
         if candidate.score < 0 or candidate.score > 100:
             return "invalid_score_range"
         component_sum = (

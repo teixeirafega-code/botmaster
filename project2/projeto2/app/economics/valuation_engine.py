@@ -8,6 +8,7 @@ from app.economics.domain_intelligence import DomainIntelligence, DomainIntellig
 from app.economics.historical_sales import HistoricalSalesIntelligence
 from app.economics.market_intelligence import MarketIntelligence
 from app.economics.models import ValuationFactors, ValuationResult
+from app.economics.trademark import detect_trademark_risk
 from app.models import DomainCandidate
 
 VOWELS = set("aeiou")
@@ -41,6 +42,9 @@ class ValuationEngine:
         resale_probability = max(0.01, min(0.95, factors.liquidity_probability * (0.55 + weighted_score / 2)))
         hold_days = max(14, round(420 * (1 - resale_probability) + 20 * (1 - factors.trend_momentum)))
         expected_sale_price = fmv * resale_probability
+        expected_holding_months = round(hold_days / 30, 2)
+        liquidity_grade = self._liquidity_grade(resale_probability, expected_holding_months)
+        trademark_risk = detect_trademark_risk(candidate.name, self.settings.risk.famous_brands)
         expected_roi = (expected_sale_price - acquisition_cost) / max(acquisition_cost, 1)
         liquidity_adjusted_roi = expected_roi * resale_probability
         time_adjusted_roi = liquidity_adjusted_roi / max(1.0, hold_days / 30)
@@ -74,6 +78,13 @@ class ValuationEngine:
                 "backlink_count": candidate.backlinks,
                 "age_years": candidate.age_years,
             },
+            estimated_sale_price=round(fmv, 2),
+            sale_probability=round(resale_probability, 4),
+            expected_holding_months=expected_holding_months,
+            expected_value=round(expected_sale_price, 2),
+            liquidity_grade=liquidity_grade,
+            trademark_risk=trademark_risk.risky,
+            trademark_reason=trademark_risk.reason,
         )
 
     def _comparable_anchor(self, candidate: DomainCandidate, intelligence: DomainIntelligence) -> float:
@@ -130,6 +141,15 @@ class ValuationEngine:
             premium = 0.85
         return int(round(max(99, fmv * premium) / 50) * 50)
 
+    def _liquidity_grade(self, sale_probability: float, holding_months: float) -> str:
+        if sale_probability >= 0.55 and holding_months <= 6:
+            return "A"
+        if sale_probability >= 0.35 and holding_months <= 12:
+            return "B"
+        if sale_probability >= 0.18 and holding_months <= 18:
+            return "C"
+        return "D"
+
     def _parts(self, domain: str) -> tuple[str, str]:
         stem, tld = domain.rsplit(".", 1)
         return stem.lower(), "." + tld.lower()
@@ -158,5 +178,4 @@ class ValuationEngine:
         return max(0.02, min(0.95, extension_base + length_bonus + commercial * 0.18 + linguistic * 0.12 + brandability * 0.08))
 
     def _looks_like_trademark(self, stem: str) -> bool:
-        risky_terms = {"google", "meta", "amazon", "tesla", "apple", "microsoft", "godaddy"}
-        return any(term in stem for term in risky_terms)
+        return detect_trademark_risk(f"{stem}.com", self.settings.risk.famous_brands).risky

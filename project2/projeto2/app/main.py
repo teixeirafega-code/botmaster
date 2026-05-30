@@ -132,12 +132,12 @@ async def async_main() -> None:
     settings = get_settings()
     try:
         if args.command == "run-once":
-            await manager.notifier.send_startup_alert()
+            await manager.notifier.send_startup_health_check()
             await manager.run_cycle()
         elif args.command == "scheduler":
             await start_scheduler(manager, settings.scheduler.interval_minutes, settings.scheduler.timezone)
         elif args.command == "sniper":
-            await manager.notifier.send_startup_alert()
+            await manager.notifier.send_startup_health_check()
             cycles = None if args.sniper_cycles == 0 else args.sniper_cycles
             results = await DomainSniper(manager).monitor(cycles=cycles)
             for result in results:

@@ -130,7 +130,31 @@ class RiskSettings(BaseModel):
     max_daily_registrations: int = 5
     max_capital_exposure: float = 250.0
     minimum_score: int = 60
+    min_score_to_buy: int = 88
+    min_expected_value: float = 250.0
+    max_domain_price_usd: float = 15.0
+    max_daily_spend_usd: float = 25.0
+    max_weekly_spend_usd: float = 100.0
+    max_buys_per_day: int = 1
+    max_portfolio_domains: int = 10
+    cooldown_minutes_between_buys: int = 120
+    allow_non_com: bool = False
     blacklist: list[str] = Field(default_factory=list)
+    famous_brands: list[str] = Field(
+        default_factory=lambda: [
+            "hyundai",
+            "apple",
+            "google",
+            "tesla",
+            "nike",
+            "adidas",
+            "amazon",
+            "microsoft",
+            "meta",
+            "netflix",
+            "samsung",
+        ]
+    )
     cooldown_minutes: int = 60
     emergency_stop: bool = False
     dry_run_audit: bool = False
@@ -156,10 +180,24 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", env_nested_delimiter="__", extra="ignore")
 
     paper_mode: bool = True
+    safe_mode: bool = True
+    auto_buy_enabled: bool = False
+    dry_run_purchases: bool = True
     config_file: Path = BASE_DIR / "config.yaml"
     state_file: Path = BASE_DIR / "data" / "domains.json"
+    pending_approvals_file: Path = BASE_DIR / "data" / "pending_approvals.json"
+    purchase_attempts_file: Path = BASE_DIR / "data" / "purchase_attempts.json"
     log_file: Path = BASE_DIR / "logs" / "domain_hunter_bot.log"
     service_name: str = "domain_hunter_bot"
+
+    env_max_daily_spend_usd: float | None = Field(default=None, validation_alias="MAX_DAILY_SPEND_USD")
+    env_max_weekly_spend_usd: float | None = Field(default=None, validation_alias="MAX_WEEKLY_SPEND_USD")
+    env_max_domain_price_usd: float | None = Field(default=None, validation_alias="MAX_DOMAIN_PRICE_USD")
+    env_min_score_to_buy: int | None = Field(default=None, validation_alias="MIN_SCORE_TO_BUY")
+    env_min_expected_value: float | None = Field(default=None, validation_alias="MIN_EXPECTED_VALUE")
+    env_max_buys_per_day: int | None = Field(default=None, validation_alias="MAX_BUYS_PER_DAY")
+    env_max_portfolio_domains: int | None = Field(default=None, validation_alias="MAX_PORTFOLIO_DOMAINS")
+    env_cooldown_minutes_between_buys: int | None = Field(default=None, validation_alias="COOLDOWN_MINUTES_BETWEEN_BUYS")
 
     godaddy_api_key: SecretStr | None = None
     godaddy_api_secret: SecretStr | None = None
@@ -183,6 +221,7 @@ class Settings(BaseSettings):
     namebio_base_url: str = "https://api.namebio.com"
     backlink_proxy_url: str = "https://backlinklog.com/api/backlinks?domain={domain}"
 
+    telegram_enabled: bool = False
     telegram_bot_token: SecretStr | None = None
     telegram_chat_id: str | None = None
     google_api_key: SecretStr | None = None
@@ -201,6 +240,19 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_live_mode(self) -> Settings:
+        risk_overrides = {
+            "max_daily_spend_usd": self.env_max_daily_spend_usd,
+            "max_weekly_spend_usd": self.env_max_weekly_spend_usd,
+            "max_domain_price_usd": self.env_max_domain_price_usd,
+            "min_score_to_buy": self.env_min_score_to_buy,
+            "min_expected_value": self.env_min_expected_value,
+            "max_buys_per_day": self.env_max_buys_per_day,
+            "max_portfolio_domains": self.env_max_portfolio_domains,
+            "cooldown_minutes_between_buys": self.env_cooldown_minutes_between_buys,
+        }
+        risk_updates = {key: value for key, value in risk_overrides.items() if value is not None}
+        if risk_updates:
+            self.risk = self.risk.model_copy(update=risk_updates)
         if not self.paper_mode and (not self.godaddy_api_key or not self.godaddy_api_secret):
             raise ValueError("GODADDY_API_KEY and GODADDY_API_SECRET are required when PAPER_MODE=false")
         return self
@@ -226,5 +278,7 @@ def get_settings() -> Settings:
         merged = _deep_merge(settings.model_dump(), yaml_data)
         settings = Settings.model_validate(merged)
     settings.state_file.parent.mkdir(parents=True, exist_ok=True)
+    settings.pending_approvals_file.parent.mkdir(parents=True, exist_ok=True)
+    settings.purchase_attempts_file.parent.mkdir(parents=True, exist_ok=True)
     settings.log_file.parent.mkdir(parents=True, exist_ok=True)
     return settings

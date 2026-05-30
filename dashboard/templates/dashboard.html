@@ -482,6 +482,143 @@
       margin-top: 14px;
       padding: 16px;
     }
+    .safety-panel {
+      margin-top: 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: linear-gradient(180deg, rgba(17, 27, 43, .94), rgba(9, 14, 24, .98));
+      box-shadow: var(--shadow);
+      padding: 16px;
+    }
+    .safety-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    .safety-header h2 {
+      font-size: 18px;
+      letter-spacing: 0;
+      line-height: 1.2;
+    }
+    .safety-statuses {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .safety-button {
+      min-height: 32px;
+      border: 1px solid rgba(56, 189, 248, .36);
+      border-radius: 6px;
+      background: rgba(56, 189, 248, .10);
+      color: var(--blue);
+      padding: 0 11px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 850;
+    }
+    .safety-button:disabled {
+      cursor: wait;
+      opacity: .68;
+    }
+    .report-status {
+      flex-basis: 100%;
+      color: var(--muted);
+      font-size: 12px;
+      text-align: right;
+    }
+    .safety-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 9px;
+    }
+    .safety-card {
+      min-height: 78px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 11px;
+      background: rgba(5, 7, 11, .42);
+    }
+    .safety-value {
+      margin-top: 7px;
+      font-size: 21px;
+      line-height: 1.1;
+      font-weight: 850;
+      overflow-wrap: anywhere;
+    }
+    .safety-chart-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.15fr) minmax(0, .9fr) minmax(0, .75fr);
+      gap: 12px;
+    }
+    .chart-card {
+      min-height: 214px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 12px;
+      background: rgba(5, 7, 11, .36);
+    }
+    .bar-list {
+      display: grid;
+      gap: 9px;
+    }
+    .bar-row {
+      display: grid;
+      grid-template-columns: minmax(92px, .55fr) minmax(0, 1fr) 42px;
+      gap: 9px;
+      align-items: center;
+      min-width: 0;
+    }
+    .bar-track {
+      height: 11px;
+      overflow: hidden;
+      border-radius: 999px;
+      border: 1px solid rgba(148, 163, 184, .12);
+      background: rgba(148, 163, 184, .18);
+    }
+    .bar-fill {
+      height: 100%;
+      min-width: 0;
+      width: 0;
+      border-radius: inherit;
+      background: var(--blue);
+    }
+    .bar-fill.good { background: var(--green); }
+    .bar-fill.warning { background: var(--amber); }
+    .bar-fill.danger { background: var(--red); }
+    .timeline-bars {
+      display: grid;
+      grid-template-columns: repeat(14, minmax(0, 1fr));
+      align-items: end;
+      gap: 5px;
+      height: 132px;
+      padding-top: 8px;
+    }
+    .timeline-bar {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 6px;
+      height: 100%;
+      min-width: 0;
+    }
+    .timeline-bar span {
+      width: 100%;
+      min-height: 3px;
+      border-radius: 999px 999px 3px 3px;
+      background: var(--amber);
+    }
+    .timeline-bar small {
+      color: var(--muted);
+      font-size: 9px;
+      white-space: nowrap;
+      transform: rotate(-44deg);
+      transform-origin: center;
+    }
     .feed-row {
       display: grid;
       grid-template-columns: 152px 122px minmax(0, 1fr);
@@ -506,7 +643,8 @@
       .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .apy-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .mini-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .mini-stats, .safety-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .safety-chart-grid { grid-template-columns: 1fr; }
     }
     @media (max-width: 900px) {
       .topbar { align-items: flex-start; flex-direction: column; }
@@ -520,7 +658,8 @@
       .shell { width: min(100vw - 20px, 1500px); padding-top: 16px; }
       h1 { font-size: 22px; }
       .summary-value { font-size: 25px; }
-      .summary-grid, .metric-grid, .apy-grid, .mini-stats { grid-template-columns: 1fr; }
+      .summary-grid, .metric-grid, .apy-grid, .mini-stats, .safety-grid { grid-template-columns: 1fr; }
+      .safety-header { flex-direction: column; }
       .card-top { align-items: flex-start; flex-direction: column; }
       .asset-row { grid-template-columns: 1fr; }
       .summary-card, .bot-card, .activity { border-radius: 7px; }
@@ -546,6 +685,7 @@
 
     <section class="summary-grid" id="summary"></section>
     <section class="bot-grid" id="cards"></section>
+    <section class="safety-panel" id="domain-safety"></section>
 
     <section class="activity">
       <div class="section-title">
@@ -559,6 +699,7 @@
   <script id="initial-data" type="application/json">{{ snapshot|json_script|safe }}</script>
   <script>
     var assetScoreFilter = 70;
+    var domainValidationReportStatus = "";
 
     function escapeHtml(value) {
       return String(value == null ? "" : value)
@@ -734,6 +875,101 @@
         body + '</article>';
     }
 
+    function renderSafetyPanel(panel) {
+      panel = panel || {};
+      var counts = panel.counts || {};
+      var flow = panel.flow || {};
+      var charts = panel.charts || {};
+      var html = '<div class="safety-header"><div><h2>Domain Hunter Safety</h2>' +
+        '<div class="subtle">Dry-run attempts are not real purchases. Pending approvals are not owned domains.</div></div>' +
+        '<div class="safety-statuses">' +
+        '<span class="badge ' + escapeHtml(panel.safe_mode_tone || "warning") + '">SAFE_MODE ' + escapeHtml(panel.safe_mode_label || "UNKNOWN") + '</span>' +
+        '<span class="badge ' + escapeHtml(panel.dry_run_purchases_tone || "warning") + '">DRY_RUN_PURCHASES ' + escapeHtml(panel.dry_run_purchases_label || "UNKNOWN") + '</span>' +
+        '<button class="safety-button" type="button" data-generate-domain-report>Generate 7-day Validation Report</button>' +
+        '<div class="report-status">' + escapeHtml(domainValidationReportStatus) + '</div>' +
+        '</div></div>' +
+        '<div class="section"><div class="section-title"><span>Review Queue</span><span class="badge">File backed</span></div>' +
+        '<div class="safety-grid">' +
+        safetyCard("Pending approvals", counts.pending_approvals || 0, "warning") +
+        safetyCard("Dry-run purchase attempts", counts.dry_run_purchase_attempts || 0, "good") +
+        safetyCard("Manually approved domains", counts.manually_approved_domains || 0, "good") +
+        safetyCard("Real purchases", counts.real_purchases || 0, (counts.real_purchases || 0) ? "danger" : "neutral") +
+        '</div></div>' +
+        '<div class="section"><div class="section-title"><span>Safety Blocks</span><span class="badge">Decision logs</span></div>' +
+        '<div class="safety-grid">' +
+        safetyCard("Blocked by trademark", counts.blocked_by_trademark || 0, "danger") +
+        safetyCard("Blocked by low liquidity", counts.blocked_by_low_liquidity || 0, "warning") +
+        safetyCard("Blocked by budget", counts.blocked_by_budget || 0, "danger") +
+        safetyCard("Blocked by cooldown", counts.blocked_by_cooldown || 0, "warning") +
+        '</div></div>' +
+        '<div class="section"><div class="section-title"><span>Capital Flow</span><span class="badge">Separated counts</span></div>' +
+        '<div class="safety-grid">' +
+        safetyCard("Opportunities Found", flow.opportunities_found || 0, "neutral") +
+        safetyCard("Domains Approved", flow.domains_approved || 0, "good") +
+        safetyCard("Domains Purchased", flow.domains_purchased || 0, (flow.domains_purchased || 0) ? "danger" : "neutral") +
+        safetyCard("Domains Sold", flow.domains_sold || 0, "good") +
+        '</div></div>' +
+        '<div class="section"><div class="section-title"><span>KPI Cards</span><span class="badge">Risk view</span></div>' +
+        '<div class="safety-grid">' + (panel.kpis || []).map(function(item) {
+          return safetyCard(item.label, item.value, item.tone || "neutral");
+        }).join("") + '</div></div>' +
+        '<div class="section"><div class="section-title"><span>Charts</span><span class="badge">Auto refreshed</span></div>' +
+        '<div class="safety-chart-grid">' +
+        '<div class="chart-card"><div class="section-title"><span>Rejection Reasons</span></div>' +
+        horizontalBars(charts.rejection_reasons || [], "No rejection reasons") + '</div>' +
+        '<div class="chart-card"><div class="section-title"><span>Pending Approvals Over Time</span></div>' +
+        pendingTimeline(charts.pending_over_time || []) + '</div>' +
+        '<div class="chart-card"><div class="section-title"><span>Approval Rate</span></div>' +
+        approvalRate(charts.approval_rate || []) + '</div>' +
+        '</div></div>';
+      document.getElementById("domain-safety").innerHTML = html;
+    }
+
+    function safetyCard(label, value, tone) {
+      return '<div class="safety-card"><div class="metric-label">' + escapeHtml(label) + '</div>' +
+        '<div class="safety-value tone-' + escapeHtml(tone || "neutral") + '">' + escapeHtml(value) + '</div></div>';
+    }
+
+    function horizontalBars(items, emptyText) {
+      items = items || [];
+      if (!items.length) return '<div class="empty">' + escapeHtml(emptyText) + '</div>';
+      var max = items.reduce(function(value, item) { return Math.max(value, Number(item.value || 0)); }, 1);
+      return '<div class="bar-list">' + items.map(function(item) {
+        var width = Math.max(3, Math.min(100, (Number(item.value || 0) / max) * 100));
+        return '<div class="bar-row"><span class="row-label truncate">' + escapeHtml(item.label) + '</span>' +
+          '<div class="bar-track"><div class="bar-fill ' + escapeHtml(item.tone || "neutral") + '" style="width:' + width.toFixed(2) + '%"></div></div>' +
+          '<strong>' + escapeHtml(item.value || 0) + '</strong></div>';
+      }).join("") + '</div>';
+    }
+
+    function pendingTimeline(items) {
+      items = items || [];
+      if (!items.length) return '<div class="empty">No pending approval history</div>';
+      var max = items.reduce(function(value, item) { return Math.max(value, Number(item.value || 0)); }, 1);
+      return '<div class="timeline-bars">' + items.map(function(item) {
+        var height = Math.max(3, Math.min(100, (Number(item.value || 0) / max) * 100));
+        return '<div class="timeline-bar" title="' + escapeHtml(item.label) + ': ' + escapeHtml(item.value || 0) + '">' +
+          '<span style="height:' + height.toFixed(2) + '%"></span><small>' + escapeHtml(item.label) + '</small></div>';
+      }).join("") + '</div>';
+    }
+
+    function approvalRate(items) {
+      var approved = 0;
+      var pending = 0;
+      var rate = 0;
+      (items || []).forEach(function(item) {
+        if (item.label === "Approved") approved = Number(item.value || 0);
+        if (item.label === "Pending") pending = Number(item.value || 0);
+        if (item.label === "Rate") rate = Number(item.value || 0);
+      });
+      return '<div class="safety-grid" style="grid-template-columns:1fr; gap:8px">' +
+        safetyCard("Approved", approved, "good") +
+        safetyCard("Pending", pending, "warning") +
+        '<div class="bar-list"><div class="bar-row" style="grid-template-columns:76px minmax(0,1fr) 54px">' +
+        '<span class="row-label">Rate</span><div class="bar-track"><div class="bar-fill good" style="width:' +
+        Math.max(0, Math.min(100, rate)).toFixed(2) + '%"></div></div><strong>' + rate.toFixed(1) + '%</strong></div></div></div>';
+    }
+
     function renderActivity(feed) {
       var html = (feed || []).map(function(item) {
         return '<div class="feed-row"><div class="feed-time">' + escapeHtml(item.time) + '</div>' +
@@ -749,6 +985,7 @@
       document.getElementById("stopped-count").textContent = snapshot.stopped_count;
       renderSummary(snapshot.summary);
       document.getElementById("cards").innerHTML = (snapshot.cards || []).map(renderCard).join("");
+      renderSafetyPanel(snapshot.domain_safety);
       renderActivity(snapshot.activity_feed);
     }
 
@@ -766,11 +1003,41 @@
     }
 
     document.addEventListener("click", function(event) {
+      var reportButton = event.target.closest("[data-generate-domain-report]");
+      if (reportButton) {
+        generateDomainValidationReport(reportButton);
+        return;
+      }
       var button = event.target.closest("[data-score-filter]");
       if (!button) return;
       assetScoreFilter = Number(button.getAttribute("data-score-filter"));
       renderSnapshot(window.currentSnapshot);
     });
+
+    async function generateDomainValidationReport(button) {
+      button.disabled = true;
+      button.textContent = "Generating...";
+      domainValidationReportStatus = "Generating validation report...";
+      renderSnapshot(window.currentSnapshot);
+      try {
+        var response = await fetch("{{ url_for('api_domain_validation_report') }}", {method: "POST", cache: "no-store"});
+        if (response.status === 401) {
+          window.location.href = "{{ url_for('login') }}";
+          return;
+        }
+        var payload = await response.json();
+        if (!response.ok || !payload.ok) {
+          domainValidationReportStatus = "Report generation failed.";
+        } else {
+          domainValidationReportStatus = (payload.partial ? "Partial report saved: " : "7-day report saved: ") +
+            payload.json_path + " and " + payload.html_path;
+        }
+      } catch (error) {
+        domainValidationReportStatus = "Report generation failed.";
+      } finally {
+        renderSnapshot(window.currentSnapshot);
+      }
+    }
 
     var initialSnapshot = JSON.parse(document.getElementById("initial-data").textContent);
     window.currentSnapshot = initialSnapshot;

@@ -1,3 +1,7 @@
+safe_mode: true
+auto_buy_enabled: false
+dry_run_purchases: true
+telegram_enabled: false
 scraper:
   whoisxml_url: "https://newly-registered-domains.whoisxmlapi.com/"
   whoisxml_download_urls: []
@@ -61,6 +65,27 @@ risk:
   max_daily_registrations: 5
   max_capital_exposure: 250.0
   minimum_score: 60
+  min_score_to_buy: 88
+  min_expected_value: 250.0
+  max_domain_price_usd: 15.0
+  max_daily_spend_usd: 25.0
+  max_weekly_spend_usd: 100.0
+  max_buys_per_day: 1
+  max_portfolio_domains: 10
+  cooldown_minutes_between_buys: 120
+  allow_non_com: false
+  famous_brands:
+    - hyundai
+    - apple
+    - google
+    - tesla
+    - nike
+    - adidas
+    - amazon
+    - microsoft
+    - meta
+    - netflix
+    - samsung
   blacklist: []
   cooldown_minutes: 60
   emergency_stop: false

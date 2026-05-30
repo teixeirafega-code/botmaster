@@ -10,14 +10,24 @@ from app.core.resilience import RetryPolicy, run_resilient
 
 
 class GoDaddyRegistrar:
+    name = "godaddy"
+
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
 
     async def register(self, domain: str, years: int = 1) -> dict[str, Any]:
+        if self.settings.dry_run_purchases:
+            return {
+                "domain": domain,
+                "registrar": self.name,
+                "dry_run_purchase": True,
+                "cost": 0.0,
+                "registered_at": datetime.now(UTC).isoformat(),
+            }
         if self.settings.paper_mode:
             return {
                 "domain": domain,
-                "registrar": "godaddy",
+                "registrar": self.name,
                 "paper_mode": True,
                 "cost": 12.0,
                 "registered_at": datetime.now(UTC).isoformat(),

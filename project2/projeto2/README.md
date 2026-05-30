@@ -2,7 +2,7 @@
 
 Production-oriented async automation bot for monitoring, scoring, registering, listing, and tracking expiring domains.
 
-The bot is safe by default: `.env` ships with `PAPER_MODE=true`, so registrations and marketplace listings are simulated while the rest of the workflow runs normally.
+The bot is safe by default: `.env` ships with `PAPER_MODE=true`, `SAFE_MODE=true`, `AUTO_BUY_ENABLED=false`, and `DRY_RUN_PURCHASES=true`, so registrations and marketplace listings are blocked unless you intentionally remove every guard.
 
 ## Folder Structure
 
@@ -168,6 +168,17 @@ GET /status
 
 Configured in `config.yaml`:
 
+- safe mode enabled by default
+- manual approval gate through `data/pending_approvals.json`
+- dry-run purchase audit through `data/purchase_attempts.json`
+- famous-brand and confusing-variation trademark rejection
+- liquidity grade, sale probability, expected holding months, and expected value checks
+- max daily and weekly spend
+- max buys per day
+- max portfolio size
+- cooldown between buys
+- `.com`-only acquisitions unless explicitly allowed
+- max purchase price per domain
 - max daily registrations
 - max capital exposure
 - blacklist
@@ -175,6 +186,10 @@ Configured in `config.yaml`:
 - cooldown periods
 - emergency stop
 - dry-run audit mode
+
+When `SAFE_MODE=true`, the bot can score, reject, watchlist, and notify, but it will not buy a candidate unless `pending_approvals.json` contains that domain with `approved=true`.
+
+When `DRY_RUN_PURCHASES=true`, even a manually approved live-mode candidate is not sent to GoDaddy. The bot writes the would-buy record to `data/purchase_attempts.json` with domain, price, registrar, approver, timestamp, dry-run block flag, and the policy snapshot that allowed the attempt.
 
 ## Economic Engine
 

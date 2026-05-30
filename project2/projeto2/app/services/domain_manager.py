@@ -18,6 +18,8 @@ from app.models import DomainCandidate, DomainStatus, ManagedDomain
 from app.observability.metrics import runtime_status
 from app.registrars.godaddy import GoDaddyRegistrar
 from app.scrapers.base import BaseScraper
+from app.services.acquisition_policy import AcquisitionPolicy, AcquisitionPolicyDecision
+from app.services.purchase_attempts import PurchaseAttemptStore
 from app.services.risk_manager import RiskManager
 from app.services.telegram_notifier import TelegramNotifier
 from app.services.transaction_manager import TransactionManager
@@ -57,6 +59,8 @@ class DomainManager:
         self.event_bus = event_bus
         self.transaction_manager = transaction_manager or TransactionManager(notifier, repository)
         self.risk_manager = risk_manager or RiskManager(settings, notifier, repository)
+        self.acquisition_policy = AcquisitionPolicy(settings, notifier, repository)
+        self.purchase_attempts = PurchaseAttemptStore(settings.purchase_attempts_file)
         self.roi_optimizer = ROIOptimizer(settings)
         self.capital_allocator = CapitalAllocator(settings)
         self.pricing_engine = DynamicPricingEngine(settings.pricing)
@@ -106,10 +110,8 @@ class DomainManager:
                 async with self._scoring_semaphore:
                     valuation = await self.scorer.value(candidate)
                     scored = candidate
-                accepted = scored.score >= self.settings.scoring.registration_threshold
-                decision = self.roi_optimizer.decide(valuation)
-                capital_allowed, capital_reason = self.capital_allocator.allowed(valuation, portfolio)
-                accepted = accepted and decision.approved and capital_allowed
+                acquisition_decision = await self.acquisition_policy.evaluate(scored, valuation, portfolio)
+                accepted = acquisition_decision.should_buy
                 await self.repository.save_valuation(
                     {
                         "domain": valuation.domain,
@@ -118,8 +120,13 @@ class DomainManager:
                         "expected_resale_probability": valuation.expected_resale_probability,
                         "estimated_holding_days": valuation.estimated_holding_days,
                         "expected_roi": valuation.expected_roi,
+                        "expected_value": valuation.expected_value,
                         "time_adjusted_roi": valuation.time_adjusted_roi,
                         "purchase_confidence": valuation.purchase_confidence,
+                        "sale_probability": valuation.sale_probability,
+                        "expected_holding_months": valuation.expected_holding_months,
+                        "liquidity_grade": valuation.liquidity_grade,
+                        "trademark_risk": valuation.trademark_risk,
                         "recommended_list_price": valuation.recommended_list_price,
                         "niche": valuation.niche,
                         "extension": valuation.extension,
@@ -146,28 +153,42 @@ class DomainManager:
                 managed = ManagedDomain(
                     name=scored.name,
                     source=scored.source,
-                    status=DomainStatus.MONITORED,
+                    status=DomainStatus.WATCHLIST
+                    if acquisition_decision.action == "watchlist"
+                    else DomainStatus.MONITORED,
                     score=scored.score,
                 )
-                if accepted and await self.risk_manager.validate_candidate(scored):
+                if acquisition_decision.should_buy and await self.risk_manager.validate_candidate(scored):
                     await self.event_bus.publish(DomainEvent(EventName.DOMAIN_APPROVED, {"domain": scored.name, "score": scored.score}))
                     try:
-                        managed = await self._register_and_list(scored, self.pricing_engine.smart_price(scored, valuation))
+                        managed = await self._register_and_list(
+                            scored,
+                            self.pricing_engine.smart_price(scored, valuation),
+                            acquisition_decision,
+                        )
                         portfolio.append(managed)
                     except Exception as exc:
                         logger.exception("registration_listing_failed", extra={"event_name": "critical_failure", "domain": scored.name, "score": scored.score})
+                        await self.notifier.send_error("Registration/listing failed", exc, critical=True)
                         await self.transaction_manager.mark_registration_failed(scored.name, str(exc))
                         await self.transaction_manager.report_failure(scored.name, "register_and_list", str(exc))
                         managed.status = DomainStatus.FAILED
-                elif not accepted:
+                elif acquisition_decision.action == "reject":
                     await self.event_bus.publish(
                         DomainEvent(
                             EventName.DOMAIN_REJECTED,
                             {
                                 "domain": scored.name,
                                 "score": scored.score,
-                                "reason": decision.reason if not decision.approved else capital_reason,
+                                "reason": acquisition_decision.reason,
                             },
+                        )
+                    )
+                elif acquisition_decision.should_buy:
+                    await self.event_bus.publish(
+                        DomainEvent(
+                            EventName.DOMAIN_REJECTED,
+                            {"domain": scored.name, "score": scored.score, "reason": "risk_manager_rejected"},
                         )
                     )
                 monitored.append(managed)
@@ -176,9 +197,62 @@ class DomainManager:
             logger.info("scheduler_run_completed", extra={"event_name": "scheduler_run_completed"})
             return monitored
 
-    async def _register_and_list(self, candidate: DomainCandidate, list_price: int | None = None) -> ManagedDomain:
+    async def _register_and_list(
+        self,
+        candidate: DomainCandidate,
+        list_price: int | None = None,
+        acquisition_decision: AcquisitionPolicyDecision | None = None,
+    ) -> ManagedDomain:
         async with self._registration_semaphore:
             async with self._domain_locks[candidate.name]:
+                price = list_price or self.settings.pricing.price_for_score(candidate.score)
+                if self.settings.dry_run_purchases:
+                    purchase_price = acquisition_decision.price if acquisition_decision else 0.0
+                    approved_by = acquisition_decision.approved_by if acquisition_decision else None
+                    policy_snapshot = (
+                        self.acquisition_policy.policy_snapshot(candidate, acquisition_decision)
+                        if acquisition_decision
+                        else {"dry_run_purchases": self.settings.dry_run_purchases, "score": candidate.score}
+                    )
+                    attempt = self.purchase_attempts.record(
+                        domain=candidate.name,
+                        price=purchase_price,
+                        registrar=self._registrar_name(),
+                        approved_by=approved_by or "manual_approval_file",
+                        blocked_by_dry_run=True,
+                        policy_snapshot=policy_snapshot,
+                    )
+                    logger.info(
+                        "dry_run_purchase_blocked",
+                        extra={
+                            "event_name": "dry_run_purchase_blocked",
+                            "domain": candidate.name,
+                            "score": candidate.score,
+                            "price": purchase_price,
+                            "registrar": attempt["registrar"],
+                            "approved_by": attempt["approved_by"],
+                            "blocked_by_dry_run": True,
+                            "policy_snapshot": policy_snapshot,
+                        },
+                    )
+                    await self.repository.save_risk_event(
+                        candidate.name,
+                        "dry_run_purchase_blocked",
+                        "info",
+                        get_correlation_id(),
+                        get_operation_id(),
+                    )
+                    await self.notifier.send_dry_run_block_alert(candidate.name, candidate.score, purchase_price, self._registrar_name())
+                    return ManagedDomain(
+                        name=candidate.name,
+                        source=candidate.source,
+                        status=DomainStatus.WATCHLIST,
+                        score=candidate.score,
+                        asking_price=price,
+                        acquisition_cost=0.0,
+                        registrar=self._registrar_name(),
+                    )
+
                 reserved = await self.transaction_manager.reserve_registration(candidate.name, candidate.score)
                 if not reserved:
                     runtime_status.duplicate_registrations_prevented += 1
@@ -194,7 +268,6 @@ class DomainManager:
                     )
 
                 registration = await self.registrar.register(candidate.name)
-                price = list_price or self.settings.pricing.price_for_score(candidate.score)
                 listed_marketplaces: list[str] = []
                 listing_results = await asyncio.gather(
                     *(marketplace.list_domain(candidate.name, price) for marketplace in self.marketplaces),
@@ -244,6 +317,9 @@ class DomainManager:
                 await self.notifier.send_apy_opportunity_alert(candidate.name, candidate.score, price)
                 await self.transaction_manager.report_success(candidate.name, "register_and_list", price=price)
                 return managed
+
+    def _registrar_name(self) -> str:
+        return str(getattr(self.registrar, "name", "godaddy"))
 
     async def reprice_stale_listings(self) -> list[ManagedDomain]:
         repriced: list[ManagedDomain] = []

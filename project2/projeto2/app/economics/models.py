@@ -56,6 +56,13 @@ class ValuationResult:
     factors: ValuationFactors
     comparable_count: int = 0
     market_signals: dict[str, float | int | str] = field(default_factory=dict)
+    estimated_sale_price: float = 0.0
+    sale_probability: float = 0.0
+    expected_holding_months: float = 0.0
+    expected_value: float = 0.0
+    liquidity_grade: str = "D"
+    trademark_risk: bool = False
+    trademark_reason: str = ""
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
