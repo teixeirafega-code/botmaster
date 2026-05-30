@@ -1,3 +1,5 @@
+import pytest
+
 from app.config.settings import Settings
 from app.domain_sources import candidates_from_csv_text
 from app.scrapers.auction_sources import GoDaddyAuctionsScraper
@@ -67,3 +69,36 @@ def test_godaddy_scraper_parses_zip_payload():
     domains = scraper._parse_payload(payload, "text/csv", "feed.csv")
 
     assert [domain.name for domain in domains] == ["betadata.net"]
+
+
+def test_auction_headers_rotate_configured_user_agents():
+    scraper = GoDaddyAuctionsScraper(Settings(scraper={"user_agents": ["UA-1"]}))
+
+    headers = scraper._headers("https://origin-auctions-inventory.godaddy.com/feed.csv.zip")
+
+    assert headers["User-Agent"] == "UA-1"
+    assert headers["Referer"] == "https://origin-auctions-inventory.godaddy.com/"
+    assert "text/csv" in headers["Accept"]
+
+
+@pytest.mark.asyncio
+async def test_auction_scraper_falls_back_to_expireddomains_when_sources_fail(monkeypatch):
+    class Fallback:
+        async def scrape(self):
+            from app.models import DomainCandidate
+
+            return [DomainCandidate(name="fallback.com", source="expireddomains_deleted")]
+
+    scraper = GoDaddyAuctionsScraper(Settings(),)
+    scraper.urls = ("https://blocked.example/feed.csv",)
+    scraper.fallback = Fallback()
+
+    async def fail_fetch(url):
+        raise RuntimeError("blocked")
+
+    monkeypatch.setattr(scraper, "_fetch_url", fail_fetch)
+
+    domains = await scraper.scrape()
+
+    assert [domain.name for domain in domains] == ["fallback.com"]
+    assert domains[0].source_metadata["fallback_for"] == "godaddy_auctions"

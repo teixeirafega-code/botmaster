@@ -178,6 +178,14 @@ class YieldOptimizerBot:
         simulated_profit = None
         if self.paper_portfolio is not None:
             simulated_profit = self.paper_portfolio.state.analytics.hypothetical_pnl_usd
+        blockchain_connected = False
+        latest_block: int | None = None
+        try:
+            blockchain_connected = bool(self.w3.is_connected())
+            if blockchain_connected:
+                latest_block = int(self.w3.eth.block_number)
+        except Exception as exc:  # noqa: BLE001
+            self.logger.warning("%s | Blockchain status check failed: %s", self.log_prefix, exc)
         return {
             "asset": asset_symbol,
             "apys": latest_apys,
@@ -185,6 +193,11 @@ class YieldOptimizerBot:
             "current_protocol": self.portfolio_manager.state.current_protocol,
             "simulated_profit": simulated_profit,
             "paper_mode": self.settings.is_paper_trading,
+            "blockchain_connected": blockchain_connected,
+            "chain": self.chain_cfg.name,
+            "chain_id": self.chain_cfg.chain_id,
+            "latest_block": latest_block,
+            "rpc_url": getattr(self.w3.provider, "endpoint_uri", ""),
         }
     async def monitor_apy_job(self) -> None:
         asset_symbol = self.cfg.assets["stablecoins"][0]
@@ -202,6 +215,7 @@ class YieldOptimizerBot:
             self.portfolio_manager.record_apy_observation(asset_symbol, observations)
             if self.paper_portfolio is not None:
                 self.paper_portfolio.record_protocol_ranking(asset_symbol, ranking)
+            write_status("yield", "Yield Optimizer", "RUNNING", self._status_metrics(asset_symbol))
         except Exception as exc:  # noqa: BLE001
             self.logger.exception("%s | monitor_apy_job failed: %s", self.log_prefix, exc)
 
@@ -470,6 +484,7 @@ class YieldOptimizerBot:
 
         sched.start()
         self.logger.info("%s | Scheduler started", self.log_prefix)
+        await self.monitor_apy_job()
         write_status("yield", "Yield Optimizer", "RUNNING", self._status_metrics())
 
         # keep event loop alive

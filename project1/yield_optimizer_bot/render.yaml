@@ -18,4 +18,5 @@ services:
         sync: false
       - key: PAPER_MODE
         value: "true"
-
+      - key: RPC_POLYGON_URL
+        sync: false

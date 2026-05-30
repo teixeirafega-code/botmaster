@@ -136,8 +136,36 @@ class Settings:
                 os.environ[key] = str(value).strip()
 
         cfg = yaml.safe_load(resolved_config_path.read_text(encoding="utf-8"))
+        cls._apply_rpc_env_overrides(cfg)
         model = ConfigModel.model_validate(cfg)
         return cls(config=model, env_path=resolved_env_path)
+
+    @staticmethod
+    def _apply_rpc_env_overrides(cfg: dict[str, Any]) -> None:
+        networks = cfg.get("networks")
+        if not isinstance(networks, dict):
+            return
+        for network_name, network_cfg in networks.items():
+            if not isinstance(network_cfg, dict):
+                continue
+            env_names = (
+                f"RPC_{str(network_name).upper()}_URL",
+                f"RPC_{str(network_name).upper()}_URLS",
+            )
+            raw = next((os.environ.get(name) for name in env_names if os.environ.get(name)), None)
+            if not raw:
+                continue
+            urls = [url.strip() for url in raw.split(",") if Settings._usable_rpc_url(url)]
+            if urls:
+                network_cfg["rpc_urls"] = urls
+
+    @staticmethod
+    def _usable_rpc_url(url: str) -> bool:
+        normalized = url.strip()
+        if not normalized:
+            return False
+        lowered = normalized.lower()
+        return "your_rpc_endpoint" not in lowered and "example.invalid" not in lowered
 
     @property
     def is_production(self) -> bool:

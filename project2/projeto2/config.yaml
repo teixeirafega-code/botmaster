@@ -6,16 +6,16 @@ scraper:
   expireddomains_max_pages: 3
   godaddy_auctions_enabled: true
   godaddy_auctions_urls:
-    - "https://inventory.auctions.godaddy.com/expiring_service_no_adult_auctions.csv.zip"
-    - "https://inventory.auctions.godaddy.com/bidding_service_no_adult_auctions.csv.zip"
+    - "https://origin-auctions-inventory.godaddy.com/expiring_service_no_adult_auctions.csv.zip"
+    - "https://origin-auctions-inventory.godaddy.com/bidding_service_no_adult_auctions.csv.zip"
   namejet_enabled: true
   namejet_urls:
-    - "https://www.namejet.com/download/allexpiring_list.csv"
-    - "https://www.namejet.com/download/expiringexclusivelist.csv"
+    - "https://www.namejet.com/pages/expiring"
+    - "https://www.namejet.com/Pages/Auctions/BrowseDomains.aspx"
   snapnames_enabled: true
   snapnames_urls:
-    - "https://www.snapnames.com/downloads/snpre.csv"
-    - "https://www.snapnames.com/downloads/snppd.csv"
+    - "https://www.snapnames.com/"
+    - "https://www.snapnames.com/store/basic.action"
   dropcatch_enabled: true
   dropcatch_expiring_url: "https://api.dropcatch.com/v2/auctions"
   user_agent: "DomainHunterBot/1.0"

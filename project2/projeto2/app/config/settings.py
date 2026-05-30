@@ -27,22 +27,22 @@ class ScraperSettings(BaseModel):
     godaddy_auctions_enabled: bool = True
     godaddy_auctions_urls: list[str] = Field(
         default_factory=lambda: [
-            "https://inventory.auctions.godaddy.com/expiring_service_no_adult_auctions.csv.zip",
-            "https://inventory.auctions.godaddy.com/bidding_service_no_adult_auctions.csv.zip",
+            "https://origin-auctions-inventory.godaddy.com/expiring_service_no_adult_auctions.csv.zip",
+            "https://origin-auctions-inventory.godaddy.com/bidding_service_no_adult_auctions.csv.zip",
         ]
     )
     namejet_enabled: bool = True
     namejet_urls: list[str] = Field(
         default_factory=lambda: [
-            "https://www.namejet.com/download/allexpiring_list.csv",
-            "https://www.namejet.com/download/expiringexclusivelist.csv",
+            "https://www.namejet.com/pages/expiring",
+            "https://www.namejet.com/Pages/Auctions/BrowseDomains.aspx",
         ]
     )
     snapnames_enabled: bool = True
     snapnames_urls: list[str] = Field(
         default_factory=lambda: [
-            "https://www.snapnames.com/downloads/snpre.csv",
-            "https://www.snapnames.com/downloads/snppd.csv",
+            "https://www.snapnames.com/",
+            "https://www.snapnames.com/store/basic.action",
         ]
     )
     dropcatch_enabled: bool = True
