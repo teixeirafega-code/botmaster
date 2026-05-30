@@ -4,7 +4,7 @@ import json
 import os
 import sqlite3
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib.error import URLError
@@ -25,7 +25,7 @@ def write_status(
         "bot_id": bot_id,
         "bot_name": bot_name,
         "status": status.upper(),
-        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(UTC).isoformat(),
         "metrics": metrics or {},
         "error": error,
     }

@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 async def start_scheduler(manager: DomainManager, interval_minutes: int, timezone: str) -> None:
     async def send_daily_report() -> None:
+        await manager.reprice_stale_listings()
         await manager.notifier.send_daily_report(await manager.load_state())
 
     async def run_scan_job() -> list[object]:

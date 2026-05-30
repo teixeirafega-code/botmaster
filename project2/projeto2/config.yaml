@@ -4,6 +4,20 @@ scraper:
   whoisxml_download_limit: 3
   expireddomains_url: "https://www.expireddomains.net/deleted-domains/"
   expireddomains_max_pages: 3
+  godaddy_auctions_enabled: true
+  godaddy_auctions_urls:
+    - "https://inventory.auctions.godaddy.com/expiring_service_no_adult_auctions.csv.zip"
+    - "https://inventory.auctions.godaddy.com/bidding_service_no_adult_auctions.csv.zip"
+  namejet_enabled: true
+  namejet_urls:
+    - "https://www.namejet.com/download/allexpiring_list.csv"
+    - "https://www.namejet.com/download/expiringexclusivelist.csv"
+  snapnames_enabled: true
+  snapnames_urls:
+    - "https://www.snapnames.com/downloads/snpre.csv"
+    - "https://www.snapnames.com/downloads/snppd.csv"
+  dropcatch_enabled: true
+  dropcatch_expiring_url: "https://api.dropcatch.com/v2/auctions"
   user_agent: "DomainHunterBot/1.0"
   user_agents:
     - "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36"
@@ -23,6 +37,9 @@ pricing:
   score_70_80: 500
   score_80_90: 1500
   score_90_100: 5000
+  reprice_after_days: 7
+  minimum_list_price: 99
+  stale_discount_rate: 0.9
 economics:
   minimum_expected_roi: 2.0
   minimum_time_adjusted_roi: 0.25

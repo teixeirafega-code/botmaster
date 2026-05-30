@@ -23,6 +23,9 @@ class DomainCandidate(BaseModel):
     keyword_value: int = 0
     extension_points: int = 0
     score: int = 0
+    expires_at: datetime | None = None
+    auction_end_at: datetime | None = None
+    source_metadata: dict[str, object] = Field(default_factory=dict)
     discovered_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
@@ -37,6 +40,6 @@ class ManagedDomain(BaseModel):
     registrar: str | None = None
     marketplaces: list[str] = Field(default_factory=list)
     registered_at: datetime | None = None
+    listed_at: datetime | None = None
     sold_at: datetime | None = None
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-

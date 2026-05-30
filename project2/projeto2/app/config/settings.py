@@ -24,6 +24,29 @@ class ScraperSettings(BaseModel):
     whoisxml_download_limit: int = 3
     expireddomains_url: str = "https://www.expireddomains.net/deleted-domains/"
     expireddomains_max_pages: int = 3
+    godaddy_auctions_enabled: bool = True
+    godaddy_auctions_urls: list[str] = Field(
+        default_factory=lambda: [
+            "https://inventory.auctions.godaddy.com/expiring_service_no_adult_auctions.csv.zip",
+            "https://inventory.auctions.godaddy.com/bidding_service_no_adult_auctions.csv.zip",
+        ]
+    )
+    namejet_enabled: bool = True
+    namejet_urls: list[str] = Field(
+        default_factory=lambda: [
+            "https://www.namejet.com/download/allexpiring_list.csv",
+            "https://www.namejet.com/download/expiringexclusivelist.csv",
+        ]
+    )
+    snapnames_enabled: bool = True
+    snapnames_urls: list[str] = Field(
+        default_factory=lambda: [
+            "https://www.snapnames.com/downloads/snpre.csv",
+            "https://www.snapnames.com/downloads/snppd.csv",
+        ]
+    )
+    dropcatch_enabled: bool = True
+    dropcatch_expiring_url: str = "https://api.dropcatch.com/v2/auctions"
     user_agent: str = "DomainHunterBot/1.0 (+https://localhost)"
     user_agents: list[str] = Field(default_factory=lambda: DEFAULT_BROWSER_USER_AGENTS.copy())
     timeout_seconds: int = 30
@@ -42,6 +65,9 @@ class PricingSettings(BaseModel):
     score_70_80: int = 500
     score_80_90: int = 1500
     score_90_100: int = 5000
+    reprice_after_days: int = 7
+    minimum_list_price: int = 99
+    stale_discount_rate: float = 0.9
 
     def price_for_score(self, score: int) -> int:
         if score >= 90:
@@ -148,6 +174,14 @@ class Settings(BaseSettings):
     sedo_base_url: str = "https://api.sedo.com/api/v1"
     afternic_api_key: SecretStr | None = None
     afternic_base_url: str = "https://api.afternic.com/v1"
+    dan_api_key: SecretStr | None = None
+    dan_base_url: str = "https://api.dan.com/api/v1"
+    dropcatch_api_key: SecretStr | None = None
+    dropcatch_base_url: str = "https://api.dropcatch.com/v2"
+    namebio_email: str | None = None
+    namebio_api_key: SecretStr | None = None
+    namebio_base_url: str = "https://api.namebio.com"
+    backlink_proxy_url: str = "https://backlinklog.com/api/backlinks?domain={domain}"
 
     telegram_bot_token: SecretStr | None = None
     telegram_chat_id: str | None = None

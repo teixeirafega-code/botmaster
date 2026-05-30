@@ -55,6 +55,7 @@ class ValuationResult:
     extension: str
     factors: ValuationFactors
     comparable_count: int = 0
+    market_signals: dict[str, float | int | str] = field(default_factory=dict)
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
@@ -63,4 +64,3 @@ class AcquisitionDecision:
     approved: bool
     reason: str
     valuation: ValuationResult
-

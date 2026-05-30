@@ -12,4 +12,15 @@ def test_profit_snapshot():
     assert snapshot["registered"] == 2
     assert snapshot["sold"] == 1
     assert snapshot["total_profit"] == 476
+    assert snapshot["total_portfolio_value"] == 500
 
+
+def test_profit_tracker_domain_rows_calculate_roi():
+    domains = [
+        ManagedDomain(name="sold.com", source="test", status=DomainStatus.SOLD, score=91, acquisition_cost=20, sale_price=220),
+    ]
+
+    rows = ProfitTracker().domain_rows(domains)
+
+    assert rows[0]["domain"] == "sold.com"
+    assert rows[0]["roi"] == 10

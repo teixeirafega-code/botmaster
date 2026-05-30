@@ -30,6 +30,8 @@ class DomainMarketplace(Protocol):
 
     async def list_domain(self, domain: str, price: int) -> dict[str, object]: ...
 
+    async def reprice_domain(self, domain: str, price: int) -> dict[str, object]: ...
+
 
 class DomainManager:
     def __init__(
@@ -57,7 +59,7 @@ class DomainManager:
         self.risk_manager = risk_manager or RiskManager(settings, notifier, repository)
         self.roi_optimizer = ROIOptimizer(settings)
         self.capital_allocator = CapitalAllocator(settings)
-        self.pricing_engine = DynamicPricingEngine()
+        self.pricing_engine = DynamicPricingEngine(settings.pricing)
         self._cycle_lock = asyncio.Lock()
         self._scoring_semaphore = asyncio.Semaphore(settings.runtime.max_concurrent_scoring)
         self._registration_semaphore = asyncio.Semaphore(settings.runtime.max_concurrent_registrations)
@@ -150,7 +152,7 @@ class DomainManager:
                 if accepted and await self.risk_manager.validate_candidate(scored):
                     await self.event_bus.publish(DomainEvent(EventName.DOMAIN_APPROVED, {"domain": scored.name, "score": scored.score}))
                     try:
-                        managed = await self._register_and_list(scored, valuation.recommended_list_price)
+                        managed = await self._register_and_list(scored, self.pricing_engine.smart_price(scored, valuation))
                         portfolio.append(managed)
                     except Exception as exc:
                         logger.exception("registration_listing_failed", extra={"event_name": "critical_failure", "domain": scored.name, "score": scored.score})
@@ -194,8 +196,18 @@ class DomainManager:
                 registration = await self.registrar.register(candidate.name)
                 price = list_price or self.settings.pricing.price_for_score(candidate.score)
                 listed_marketplaces: list[str] = []
-                for marketplace in self.marketplaces:
-                    await marketplace.list_domain(candidate.name, price)
+                listing_results = await asyncio.gather(
+                    *(marketplace.list_domain(candidate.name, price) for marketplace in self.marketplaces),
+                    return_exceptions=True,
+                )
+                for marketplace, listing_result in zip(self.marketplaces, listing_results, strict=True):
+                    if isinstance(listing_result, Exception):
+                        logger.exception(
+                            "marketplace_listing_failed",
+                            exc_info=listing_result,
+                            extra={"event_name": "marketplace_listing_failed", "domain": candidate.name, "marketplace": marketplace.name},
+                        )
+                        continue
                     listed_marketplaces.append(marketplace.name)
                     await self.repository.save_listing(
                         candidate.name,
@@ -215,13 +227,14 @@ class DomainManager:
                 managed = ManagedDomain(
                     name=candidate.name,
                     source=candidate.source,
-                    status=DomainStatus.LISTED,
+                    status=DomainStatus.LISTED if listed_marketplaces else DomainStatus.REGISTERED,
                     score=candidate.score,
                     asking_price=price,
                     acquisition_cost=cost,
                     registrar="godaddy",
                     marketplaces=listed_marketplaces,
                     registered_at=datetime.now(UTC),
+                    listed_at=datetime.now(UTC),
                 )
                 await self.transaction_manager.persist_registration(managed)
                 runtime_status.domains_registered += 1
@@ -231,6 +244,31 @@ class DomainManager:
                 await self.notifier.send_apy_opportunity_alert(candidate.name, candidate.score, price)
                 await self.transaction_manager.report_success(candidate.name, "register_and_list", price=price)
                 return managed
+
+    async def reprice_stale_listings(self) -> list[ManagedDomain]:
+        repriced: list[ManagedDomain] = []
+        portfolio = await self.load_state()
+        for domain in portfolio:
+            if domain.status != DomainStatus.LISTED:
+                continue
+            candidate = DomainCandidate(
+                name=domain.name,
+                source=domain.source,
+                score=domain.score,
+                age_years=max(0, ((datetime.now(UTC) - domain.registered_at).days // 365) if domain.registered_at else 0),
+            )
+            valuation = await self.scorer.value(candidate)
+            new_price = self.pricing_engine.repricing_recommendation(domain, valuation)
+            if not new_price or new_price == domain.asking_price:
+                continue
+            await asyncio.gather(
+                *(marketplace.reprice_domain(domain.name, new_price) for marketplace in self.marketplaces if marketplace.name in domain.marketplaces),
+                return_exceptions=True,
+            )
+            domain.asking_price = new_price
+            domain.updated_at = datetime.now(UTC)
+            repriced.append(domain)
+        return repriced
 
     async def load_state(self) -> list[ManagedDomain]:
         return await self.repository.list_managed_domains()

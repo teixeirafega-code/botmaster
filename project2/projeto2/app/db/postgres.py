@@ -403,19 +403,27 @@ class PostgresDomainRepository(DomainRepository):
     async def save_listing(self, domain: str, marketplace: str, price: int, correlation_id: str, operation_id: str) -> None:
         assert self.pool
         async with self.pool.acquire() as conn:
-            await conn.execute(
-                """
-                INSERT INTO listings(domain, marketplace, price, status, listed_at, correlation_id, operation_id)
-                VALUES($1,$2,$3,'created',$4,$5,$6)
-                ON CONFLICT(domain, marketplace) DO NOTHING
-                """,
-                domain,
-                marketplace,
-                price,
-                datetime.now(UTC),
-                correlation_id,
-                operation_id,
-            )
+            async with conn.transaction():
+                listed_at = datetime.now(UTC)
+                await conn.execute(
+                    """
+                    INSERT INTO listings(domain, marketplace, price, status, listed_at, correlation_id, operation_id)
+                    VALUES($1,$2,$3,'created',$4,$5,$6)
+                    ON CONFLICT(domain, marketplace) DO UPDATE SET
+                        price=EXCLUDED.price,
+                        status=EXCLUDED.status,
+                        listed_at=EXCLUDED.listed_at,
+                        correlation_id=EXCLUDED.correlation_id,
+                        operation_id=EXCLUDED.operation_id
+                    """,
+                    domain,
+                    marketplace,
+                    price,
+                    listed_at,
+                    correlation_id,
+                    operation_id,
+                )
+                await conn.execute("UPDATE registrations SET status='listed' WHERE domain=$1 AND status IN ('pending','registered')", domain)
 
     async def save_risk_event(self, domain: str | None, reason: str, severity: str, correlation_id: str, operation_id: str) -> None:
         assert self.pool
@@ -474,16 +482,41 @@ class PostgresDomainRepository(DomainRepository):
     async def list_managed_domains(self) -> list[ManagedDomain]:
         assert self.pool
         async with self.pool.acquire() as conn:
-            rows = await conn.fetch("SELECT domain, registrar, score, cost, status, registered_at FROM registrations ORDER BY registered_at DESC")
+            rows = await conn.fetch(
+                """
+                SELECT
+                    r.domain,
+                    r.registrar,
+                    r.score,
+                    r.cost,
+                    CASE WHEN s.sale_price IS NOT NULL THEN 'sold' ELSE r.status END AS status,
+                    r.registered_at,
+                    COALESCE(MAX(l.price), 0) AS asking_price,
+                    ARRAY_REMOVE(ARRAY_AGG(DISTINCT l.marketplace), NULL) AS marketplaces,
+                    MIN(l.listed_at) AS listed_at,
+                    COALESCE(MAX(s.sale_price), 0) AS sale_price,
+                    MAX(s.sold_at) AS sold_at
+                FROM registrations r
+                LEFT JOIN listings l ON l.domain = r.domain
+                LEFT JOIN sales s ON s.domain = r.domain
+                GROUP BY r.domain, r.registrar, r.score, r.cost, r.status, r.registered_at, s.sale_price
+                ORDER BY r.registered_at DESC
+                """
+            )
         return [
             ManagedDomain(
                 name=row["domain"],
                 source="postgres",
                 status=DomainStatus(row["status"]),
                 score=row["score"],
+                asking_price=int(row["asking_price"] or 0),
                 acquisition_cost=float(row["cost"]),
+                sale_price=float(row["sale_price"] or 0),
                 registrar=row["registrar"],
+                marketplaces=list(row["marketplaces"] or []),
                 registered_at=row["registered_at"],
+                listed_at=row["listed_at"],
+                sold_at=row["sold_at"],
             )
             for row in rows
         ]
@@ -557,7 +590,16 @@ class MemoryDomainRepository(DomainRepository):
             self.risk_events.append((domain, reason, "error"))
 
     async def save_listing(self, domain: str, marketplace: str, price: int, correlation_id: str, operation_id: str) -> None:
-        return None
+        async with self._lock:
+            existing = self.domains.get(domain)
+            if not existing:
+                return
+            if marketplace not in existing.marketplaces:
+                existing.marketplaces.append(marketplace)
+            existing.asking_price = price
+            existing.status = DomainStatus.LISTED
+            existing.listed_at = existing.listed_at or datetime.now(UTC)
+            existing.updated_at = datetime.now(UTC)
 
     async def save_risk_event(self, domain: str | None, reason: str, severity: str, correlation_id: str, operation_id: str) -> None:
         async with self._lock:

@@ -38,7 +38,23 @@ class BacklinkChecker:
     async def _opportunistic_head_count(self, domain: str) -> int:
         timeout = aiohttp.ClientTimeout(total=self.settings.scraper.timeout_seconds)
         async with aiohttp.ClientSession() as session:
-            async with session.get(f"https://{domain}", timeout=timeout) as resp:
+            proxy_url = self.settings.backlink_proxy_url.format(domain=domain)
+            async with session.get(proxy_url, timeout=timeout) as resp:
                 if resp.status < 400:
-                    return 20
+                    content_type = resp.headers.get("Content-Type", "").lower()
+                    if "json" in content_type:
+                        payload = await resp.json()
+                        return self._count_backlink_payload(payload)
+                    text = await resp.text()
+                    return len([line for line in text.splitlines() if line.strip()])
+        return 0
+
+    def _count_backlink_payload(self, payload: Any) -> int:
+        if isinstance(payload, dict):
+            for key in ("backlinks", "backlink_count", "total", "count", "referring_domains"):
+                if key in payload:
+                    return int(float(payload[key] or 0))
+            return max((self._count_backlink_payload(value) for value in payload.values()), default=0)
+        if isinstance(payload, list):
+            return len(payload)
         return 0

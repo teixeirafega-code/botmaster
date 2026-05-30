@@ -1,3 +1,4 @@
+import csv
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -107,6 +108,68 @@ def test_backtesting_report_calculates_strategy_metrics():
     assert report.trades == 2
     assert report.hit_rate == 0.5
     assert report.false_positive_rate == 0.5
+
+
+def test_backtesting_stress_test_reports_requested_cost_scenarios(tmp_path):
+    report = BacktestingEngine().run_stress_test(
+        [
+            BacktestTrade("a.com", 100, 160, 150, 30, True, transaction_cost=10, period="2026-01"),
+            BacktestTrade("b.com", 100, 150, 135, 30, True, transaction_cost=10, period="2026-02"),
+            BacktestTrade("c.com", 100, 150, 130, 30, False, transaction_cost=10, period="2026-03"),
+        ],
+        output_dir=tmp_path,
+    )
+
+    assert [scenario.scenario for scenario in report.scenarios] == [
+        "base",
+        "2x costs",
+        "3x costs",
+        "slippage 10 points",
+        "slippage 15 points",
+        "spread 10 points",
+        "spread 15 points",
+    ]
+    assert report.profitable_scenarios == (
+        "base",
+        "2x costs",
+        "3x costs",
+        "slippage 10 points",
+        "slippage 15 points",
+        "spread 10 points",
+        "spread 15 points",
+    )
+    assert report.fragile is False
+    by_name = {scenario.scenario: scenario for scenario in report.scenarios}
+    assert by_name["slippage 10 points"].net_pnl == 45
+    assert by_name["spread 15 points"].net_pnl == 35
+
+    report_text = (tmp_path / "stress_test_report.txt").read_text(encoding="utf-8")
+    assert "Profitable scenarios: base, 2x costs, 3x costs, slippage 10 points, slippage 15 points, spread 10 points, spread 15 points" in report_text
+    assert "Strategy fragility: ROBUST" in report_text
+
+    with (tmp_path / "stress_test_scenarios.csv").open(encoding="utf-8", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    assert rows[0]["scenario"] == "base"
+    assert rows[0]["net_pnl"] == "65.000000"
+    assert rows[0]["failed_periods"] == "0"
+
+
+def test_backtesting_stress_test_marks_strategy_fragile_when_modest_costs_remove_profitability(tmp_path):
+    report = BacktestingEngine().run_stress_test(
+        [
+            BacktestTrade("a.com", 100, 120, 106, 30, True, transaction_cost=5, period="2026-01"),
+            BacktestTrade("b.com", 100, 120, 106, 30, True, transaction_cost=5, period="2026-02"),
+        ],
+        output_dir=tmp_path,
+    )
+
+    by_name = {scenario.scenario: scenario for scenario in report.scenarios}
+    assert by_name["base"].profitable is True
+    assert by_name["2x costs"].profitable is False
+    assert by_name["2x costs"].failed_periods == 2
+    assert by_name["2x costs"].failed_period_names == ("2026-01", "2026-02")
+    assert report.fragile is True
+    assert "Strategy fragility: FRAGILE" in (tmp_path / "stress_test_report.txt").read_text(encoding="utf-8")
 
 
 def test_dynamic_pricing_discounts_stale_inventory():

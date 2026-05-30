@@ -124,6 +124,12 @@ class TelegramNotifier:
         reason_line = f"\nReason: {reason}" if reason else ""
         return await self.send_message(f"Transaction {status}\nAction: {action}\nDomain: {domain}{price_line}{reason_line}")
 
+    async def send_sale_alert(self, domain: ManagedDomain) -> bool:
+        profit = domain.sale_price - domain.acquisition_cost
+        return await self.send_message(
+            f"Domain sold\nDomain: {domain.name}\nSale price: ${domain.sale_price:.2f}\nCost: ${domain.acquisition_cost:.2f}\nProfit: ${profit:.2f}"
+        )
+
     async def send_daily_report(self, domains: list[ManagedDomain]) -> bool:
         snapshot = ProfitTracker().snapshot(domains)
         return await self.send_message(
@@ -132,7 +138,8 @@ class TelegramNotifier:
             f"Registered: {snapshot['registered']}\n"
             f"Sold: {snapshot['sold']}\n"
             f"Total invested: ${snapshot['total_invested']}\n"
-            f"Total profit: ${snapshot['total_profit']}",
+            f"Total profit: ${snapshot['total_profit']}\n"
+            f"Portfolio value: ${snapshot['total_portfolio_value']}",
             disable_notification=True,
         )
 

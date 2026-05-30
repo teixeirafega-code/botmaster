@@ -4,6 +4,7 @@ import math
 import re
 
 from app.config.settings import Settings
+from app.economics.domain_intelligence import DomainIntelligence, DomainIntelligenceClient
 from app.economics.historical_sales import HistoricalSalesIntelligence
 from app.economics.market_intelligence import MarketIntelligence
 from app.economics.models import ValuationFactors, ValuationResult
@@ -19,16 +20,19 @@ class ValuationEngine:
         settings: Settings,
         market: MarketIntelligence | None = None,
         sales: HistoricalSalesIntelligence | None = None,
+        intelligence_client: DomainIntelligenceClient | None = None,
     ) -> None:
         self.settings = settings
         self.market = market or MarketIntelligence()
         self.sales = sales or HistoricalSalesIntelligence(self.market)
+        self.intelligence_client = intelligence_client or DomainIntelligenceClient(settings)
 
     async def value(self, candidate: DomainCandidate, acquisition_cost: float = 12.0) -> ValuationResult:
+        intelligence = await self.intelligence_client.enrich(candidate)
         stem, extension = self._parts(candidate.name)
         comparables = self.sales.find_comparables(candidate.name)
-        comparable_anchor = self.sales.median_price(candidate.name)
-        factors = self._factors(candidate, stem, extension, comparable_anchor)
+        comparable_anchor = self._comparable_anchor(candidate, intelligence)
+        factors = self._factors(candidate, stem, extension, comparable_anchor, intelligence)
         weighted_score = self._weighted_score(factors)
         score = max(0, min(100, round(weighted_score * 100)))
 
@@ -60,10 +64,27 @@ class ValuationEngine:
             niche=self.market.niche_for_domain(candidate.name),
             extension=extension,
             factors=factors,
-            comparable_count=len(comparables),
+            comparable_count=len(comparables) + len(intelligence.namebio_sales),
+            market_signals={
+                "wayback_capture_count": intelligence.wayback.capture_count,
+                "wayback_history_score": round(intelligence.wayback.history_score, 4),
+                "namebio_comparable_median": round(intelligence.comparable_median, 2),
+                "namebio_tld_average_price": round(intelligence.tld_average_price, 2),
+                "namebio_keyword_average_price": round(intelligence.keyword_sales_average, 2),
+                "backlink_count": candidate.backlinks,
+                "age_years": candidate.age_years,
+            },
         )
 
-    def _factors(self, candidate: DomainCandidate, stem: str, extension: str, comparable_anchor: float) -> ValuationFactors:
+    def _comparable_anchor(self, candidate: DomainCandidate, intelligence: DomainIntelligence) -> float:
+        anchors = [self.sales.median_price(candidate.name)]
+        if intelligence.comparable_median > 0:
+            anchors.append(intelligence.comparable_median)
+        if intelligence.keyword_sales_average > 0:
+            anchors.append(intelligence.keyword_sales_average)
+        return sum(anchors) / len(anchors)
+
+    def _factors(self, candidate: DomainCandidate, stem: str, extension: str, comparable_anchor: float, intelligence: DomainIntelligence) -> ValuationFactors:
         length = len(stem)
         extension_quality = self.settings.scoring.extension_points.get(extension, 0) / 10
         linguistic = self._linguistic_quality(stem)
@@ -72,7 +93,7 @@ class ValuationEngine:
         backlink_quality = min(1.0, math.log1p(max(0, candidate.backlinks)) / math.log(800))
         spam_safety = 0.25 if any(pattern in stem for pattern in BAD_PATTERNS) else 0.9
         trademark_safety = 0.25 if self._looks_like_trademark(stem) else 0.95
-        archive_quality = min(1.0, max(0.1, candidate.age_years / 12))
+        archive_quality = max(min(1.0, max(0.1, candidate.age_years / 12)), intelligence.wayback.history_score)
         search_demand = min(1.0, (candidate.keyword_value + commercial * 10) / 25)
         cpc_value = min(1.0, commercial * 0.8 + (0.2 if "loan" in stem or "insurance" in stem else 0))
         liquidity = self._liquidity_probability(stem, extension, commercial, linguistic, brandability)
@@ -139,4 +160,3 @@ class ValuationEngine:
     def _looks_like_trademark(self, stem: str) -> bool:
         risky_terms = {"google", "meta", "amazon", "tesla", "apple", "microsoft", "godaddy"}
         return any(term in stem for term in risky_terms)
-

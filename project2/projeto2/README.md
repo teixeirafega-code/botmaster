@@ -13,7 +13,7 @@ app/
   observability/        JSON logging, metrics, health/status server
   economics/            valuation, ROI, allocation, pricing, backtests, reports
   config/               Pydantic settings
-  scrapers/             WhoisXML public feeds and ExpiredDomains deleted-domain sources
+  scrapers/             WhoisXML, ExpiredDomains, GoDaddy Auctions, NameJet, SnapNames, DropCatch feeds
   analyzers/            scoring, backlinks, keywords
   registrars/           GoDaddy and Namecheap clients
   marketplaces/         GoDaddy Auctions, Sedo, Afternic clients
@@ -51,16 +51,27 @@ PAPER_MODE=true
 DATABASE__URL=postgresql://domain_hunter:domain_hunter@localhost:5432/domain_hunter
 GODADDY_API_KEY=
 GODADDY_API_SECRET=
+SEDO_API_KEY=
+AFTERNIC_API_KEY=
+DAN_API_KEY=
+DROPCATCH_API_KEY=
+NAMEBIO_EMAIL=
+NAMEBIO_API_KEY=
+BACKLINK_PROXY_URL=https://backlinklog.com/api/backlinks?domain={domain}
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_CHAT_ID=
 ```
 
 Keep `.env` out of version control. The bundled discovery scrapers do not require registrar credentials. Registrar keys can control purchases, listings, and account-level domain operations.
 
-The default scan sources are credential-free:
+The default scan sources are credential-free where public feeds are available:
 
 - `scraper.whoisxml_url` discovers public WhoisXML domain-feed sample downloads, and `scraper.whoisxml_download_urls` can pin direct CSV, JSON, ZIP, GZ, or TAR.GZ feed URLs.
 - `scraper.expireddomains_url` defaults to `https://www.expireddomains.net/deleted-domains/` and follows pagination up to `scraper.expireddomains_max_pages`.
+- `scraper.godaddy_auctions_urls` reads GoDaddy Auctions inventory CSV ZIP feeds.
+- `scraper.namejet_urls` reads NameJet expiring-domain CSV feeds.
+- `scraper.snapnames_urls` reads SnapNames CSV feeds.
+- `scraper.dropcatch_expiring_url` can read DropCatch expiring/auction JSON feeds when an API key is configured.
 
 Set `PAPER_MODE=false` only after:
 
@@ -75,6 +86,9 @@ Set `PAPER_MODE=false` only after:
 python -m app.main dashboard
 python -m app.main run-once
 python -m app.main scheduler
+python -m app.main sniper --sniper-cycles 1
+python -m app.main reprice
+python -m app.main portfolio
 ```
 
 Scheduler mode starts:
@@ -179,7 +193,34 @@ Factors include comparable sales, commercial intent, CPC proxy, search demand, T
 
 Capital allocation rejects acquisitions that would overconcentrate the portfolio by extension or niche, or exceed configured capital exposure.
 
-Dynamic pricing uses valuation, liquidity, and inventory age. Stale domains are discounted through the repricing engine instead of accumulating dead capital indefinitely.
+Dynamic pricing uses valuation, keyword value, backlink count, domain age, comparable sales, liquidity, and inventory age. Stale domains are discounted through the repricing engine after 7 days instead of accumulating dead capital indefinitely.
+
+The live valuation path enriches candidates with:
+
+- Wayback CDX history, first-seen date, and capture density.
+- NameBio comparable sales and keyword/TLD sale averages when `NAMEBIO_EMAIL` and `NAMEBIO_API_KEY` are configured.
+- Backlink counts through `BACKLINK_PROXY_URL`.
+
+Paper mode remains deterministic and does not buy or list live assets.
+
+## Domain Sniper
+
+`python -m app.main sniper --sniper-cycles 0` runs continuously. The sniper refreshes sources every 30 seconds, watches domains expiring in the next hour, pre-submits a DropCatch backorder when configured, and schedules the registrar registration attempt at the target expiry timestamp with a short retry loop.
+
+Exact registry availability still depends on registrar/network latency and the upstream drop feed timestamp, so start in paper mode and verify clock sync before using live capital.
+
+## Portfolio Tracker
+
+`python -m app.main portfolio` writes `data/portfolio_report.csv` with:
+
+- domain
+- cost
+- list price
+- days listed
+- per-domain ROI
+- marketplaces
+
+The dashboard and daily Telegram report include total portfolio value, realized profit, and sold-domain alerts.
 
 ## Profitability KPIs
 
