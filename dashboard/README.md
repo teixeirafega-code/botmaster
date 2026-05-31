@@ -1,8 +1,8 @@
-# BotMaster Dashboard
+# Painel BotMaster
 
-Flask dashboard for monitoring the four local bots in `C:\Users\tgt\Desktop\botmaster`.
+Dashboard Flask para monitorar os quatro bots locais em `C:\Users\tgt\Desktop\botmaster`.
 
-## Local Run
+## Execucao Local
 
 ```powershell
 cd C:\Users\tgt\Desktop\botmaster\dashboard
@@ -11,41 +11,41 @@ python -m venv .venv
 .\.venv\Scripts\python.exe app.py
 ```
 
-Open `http://127.0.0.1:5000`.
+Abra `http://127.0.0.1:5000`.
 
-The login password is read from `DASHBOARD_PASSWORD` in `.env`. `FLASK_SECRET_KEY` is required for signed sessions.
+A senha de login e lida de `DASHBOARD_PASSWORD` no `.env`. `FLASK_SECRET_KEY` e obrigatoria para sessoes assinadas.
 
-## Data Sources
+## Fontes de Dados
 
 - Yield Optimizer: `project1\yield_optimizer_bot\app\data\state.json`, `logs\bot.log`
-- Domain Hunter: `project2\projeto2` when present, otherwise `projeto2`; reads `data\domains.json`, `logs\domain_hunter_bot.log`
+- Domain Hunter: `project2\projeto2` quando presente, caso contrario `projeto2`; le `data\domains.json` e `logs\domain_hunter_bot.log`
 - Asset Flip: `project3\asset_flip_bot\data\profit_stats.json`, `data\assets_state.json`, `logs\asset_flip_bot.log`
 - Trend Hunter: `project4\trend_hunter_bot\trend_hunter.db`, `logs\trend_hunter.log`
 
-The dashboard does not mutate bot data. It only reads logs, JSON state, and SQLite state.
+O dashboard nao altera dados dos bots. Ele apenas le logs, estado JSON e estado SQLite.
 
-## Render Deploy
+## Deploy no Render
 
-1. Push the `dashboard` directory to a Git repository.
-2. Create a new Render Web Service.
-3. Set build command:
+1. Envie o diretorio `dashboard` para um repositorio Git.
+2. Crie um novo Render Web Service.
+3. Defina o comando de build:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-4. Set start command:
+4. Defina o comando de start:
 
 ```bash
 gunicorn app:app
 ```
 
-5. Add environment variables in Render:
+5. Adicione as variaveis de ambiente no Render:
 
 ```text
-DASHBOARD_PASSWORD=<strong private password>
-FLASK_SECRET_KEY=<64+ character random secret>
+DASHBOARD_PASSWORD=<senha privada forte>
+FLASK_SECRET_KEY=<segredo aleatorio com 64+ caracteres>
 BOTMASTER_ROOT=/opt/render/project/src
 ```
 
-For Render, bot data files must be present in the deployed repository or mounted storage path referenced by `BOTMASTER_ROOT`.
+No Render, os arquivos de dados dos bots precisam estar no repositorio implantado ou em um caminho de storage montado e referenciado por `BOTMASTER_ROOT`.

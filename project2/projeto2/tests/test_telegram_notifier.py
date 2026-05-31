@@ -95,10 +95,10 @@ async def test_startup_health_check_success_sends_once(monkeypatch):
 
     assert len(bot.messages) == 1
     message = bot.messages[0]["text"]
-    assert "✅ Domain Hunter started successfully." in message
-    assert "SAFE_MODE=ON" in message
-    assert "DRY_RUN_PURCHASES=ON" in message
-    assert "Timestamp:" in message
+    assert "✅ Domain Hunter iniciado com sucesso." in message
+    assert "SAFE_MODE=ATIVO" in message
+    assert "DRY_RUN_PURCHASES=ATIVO" in message
+    assert "Horario:" in message
     assert "telegram-token" not in message
     assert repository.alerts == [("telegram", message, True)]
 

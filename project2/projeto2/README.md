@@ -1,40 +1,40 @@
 # Domain Hunter Bot
 
-Production-oriented async automation bot for monitoring, scoring, registering, listing, and tracking expiring domains.
+Bot de automacao assíncrona orientado a producao para monitorar, pontuar, registrar, listar e acompanhar dominios em expiracao.
 
-The bot is safe by default: `.env` ships with `PAPER_MODE=true`, `SAFE_MODE=true`, `AUTO_BUY_ENABLED=false`, and `DRY_RUN_PURCHASES=true`, so registrations and marketplace listings are blocked unless you intentionally remove every guard.
+O bot e seguro por padrao: o `.env` vem com `PAPER_MODE=true`, `SAFE_MODE=true`, `AUTO_BUY_ENABLED=false` e `DRY_RUN_PURCHASES=true`, entao registros e listagens em marketplaces ficam bloqueados ate que voce remova cada protecao de forma intencional.
 
-## Folder Structure
+## Estrutura de Pastas
 
 ```text
 app/
-  core/                 contextvars, event bus, resilience primitives
-  db/                   PostgreSQL repository and schema
-  observability/        JSON logging, metrics, health/status server
-  economics/            valuation, ROI, allocation, pricing, backtests, reports
-  config/               Pydantic settings
-  scrapers/             WhoisXML, ExpiredDomains, GoDaddy Auctions, NameJet, SnapNames, DropCatch feeds
-  analyzers/            scoring, backlinks, keywords
-  registrars/           GoDaddy and Namecheap clients
-  marketplaces/         GoDaddy Auctions, Sedo, Afternic clients
-  services/             domain manager, Telegram, risk, transactions, rebalance
-  utils/                compatibility helpers
-tests/                  async, resilience, idempotency, Telegram, DB-gated tests
+  core/                 contextvars, barramento de eventos e primitivas de resiliencia
+  db/                   repositorio PostgreSQL e schema
+  observability/        logs JSON, metricas e servidor de health/status
+  economics/            valuation, ROI, alocacao, precificacao, backtests e relatorios
+  config/               configuracoes Pydantic
+  scrapers/             feeds WhoisXML, ExpiredDomains, GoDaddy Auctions, NameJet, SnapNames e DropCatch
+  analyzers/            scoring, backlinks e palavras-chave
+  registrars/           clientes GoDaddy e Namecheap
+  marketplaces/         clientes GoDaddy Auctions, Sedo e Afternic
+  services/             gerenciador de dominios, Telegram, risco, transacoes e rebalanceamento
+  utils/                auxiliares de compatibilidade
+tests/                  testes async, resiliencia, idempotencia, Telegram e DB
 ```
 
-## Architecture
+## Arquitetura
 
-- Modular monolith, not microservices.
-- Internal event bus for `DOMAIN_SCANNED`, `DOMAIN_SCORED`, `DOMAIN_APPROVED`, `DOMAIN_REJECTED`, `DOMAIN_REGISTERED`, `LISTING_CREATED`, `ALERT_TRIGGERED`, and `CRITICAL_FAILURE`.
-- Context propagation with `contextvars` for `correlation_id`, `operation_id`, and `execution_mode`.
-- Structured JSON logs with automatic secret redaction.
-- PostgreSQL persistence through `asyncpg` pooling. If `DATABASE__URL` is empty, local runs use an in-memory repository for safe development.
-- Circuit breakers and exponential backoff with jitter around scrapers, GoDaddy, Sedo, Afternic, and Telegram.
-- APScheduler drives scan cycles and daily reports.
-- `aiohttp` exposes `/health`, `/metrics`, and `/status` during scheduler mode.
-- Acquisition is now economics-first: valuation, ROI, liquidity, holding time, and capital concentration must pass before registration.
+- Monolito modular, nao microservicos.
+- Barramento interno de eventos para `DOMAIN_SCANNED`, `DOMAIN_SCORED`, `DOMAIN_APPROVED`, `DOMAIN_REJECTED`, `DOMAIN_REGISTERED`, `LISTING_CREATED`, `ALERT_TRIGGERED` e `CRITICAL_FAILURE`.
+- Propagacao de contexto com `contextvars` para `correlation_id`, `operation_id` e `execution_mode`.
+- Logs JSON estruturados com redacao automatica de segredos.
+- Persistencia PostgreSQL por pool `asyncpg`. Se `DATABASE__URL` estiver vazio, execucoes locais usam um repositorio em memoria para desenvolvimento seguro.
+- Circuit breakers e backoff exponencial com jitter em scrapers, GoDaddy, Sedo, Afternic e Telegram.
+- APScheduler executa ciclos de varredura e relatorios diarios.
+- `aiohttp` expoe `/health`, `/metrics` e `/status` no modo scheduler.
+- Aquisicao agora e guiada por economia: valuation, ROI, liquidez, prazo de carregamento e concentracao de capital precisam passar antes do registro.
 
-## Install
+## Instalacao
 
 ```bash
 python -m venv .venv
@@ -42,9 +42,9 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-## Configuration
+## Configuracao
 
-Copy `.env.example` to `.env` and fill only the values needed for your mode.
+Copie `.env.example` para `.env` e preencha apenas os valores necessarios para o seu modo.
 
 ```env
 PAPER_MODE=true
@@ -58,29 +58,30 @@ DROPCATCH_API_KEY=
 NAMEBIO_EMAIL=
 NAMEBIO_API_KEY=
 BACKLINK_PROXY_URL=https://backlinklog.com/api/backlinks?domain={domain}
+TELEGRAM_ENABLED=false
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_CHAT_ID=
 ```
 
-Keep `.env` out of version control. The bundled discovery scrapers do not require registrar credentials. Registrar keys can control purchases, listings, and account-level domain operations.
+Mantenha `.env` fora do controle de versao. Os scrapers de descoberta incluidos nao exigem credenciais de registrador. Chaves de registrador podem controlar compras, listagens e operacoes de conta.
 
-The default scan sources are credential-free where public feeds are available:
+As fontes padrao de varredura nao exigem credenciais quando feeds publicos estao disponiveis:
 
-- `scraper.whoisxml_url` discovers public WhoisXML domain-feed sample downloads, and `scraper.whoisxml_download_urls` can pin direct CSV, JSON, ZIP, GZ, or TAR.GZ feed URLs.
-- `scraper.expireddomains_url` defaults to `https://www.expireddomains.net/deleted-domains/` and follows pagination up to `scraper.expireddomains_max_pages`.
-- `scraper.godaddy_auctions_urls` reads GoDaddy Auctions inventory CSV ZIP feeds.
-- `scraper.namejet_urls` reads NameJet expiring-domain CSV feeds.
-- `scraper.snapnames_urls` reads SnapNames CSV feeds.
-- `scraper.dropcatch_expiring_url` can read DropCatch expiring/auction JSON feeds when an API key is configured.
+- `scraper.whoisxml_url` descobre downloads publicos de amostras do feed WhoisXML, e `scraper.whoisxml_download_urls` pode fixar URLs diretas de feeds CSV, JSON, ZIP, GZ ou TAR.GZ.
+- `scraper.expireddomains_url` usa `https://www.expireddomains.net/deleted-domains/` por padrao e segue paginacao ate `scraper.expireddomains_max_pages`.
+- `scraper.godaddy_auctions_urls` le feeds CSV ZIP do inventario GoDaddy Auctions.
+- `scraper.namejet_urls` le feeds CSV de dominios expirando na NameJet.
+- `scraper.snapnames_urls` le feeds CSV da SnapNames.
+- `scraper.dropcatch_expiring_url` pode ler feeds JSON de expiracao/leilao da DropCatch quando uma chave de API estiver configurada.
 
-Set `PAPER_MODE=false` only after:
+Defina `PAPER_MODE=false` apenas depois de:
 
-- GoDaddy credentials are configured.
-- PostgreSQL is reachable.
-- Risk limits in `config.yaml` are intentionally chosen.
-- A small paper-mode run has completed successfully.
+- configurar credenciais GoDaddy;
+- confirmar que o PostgreSQL esta acessivel;
+- escolher de forma intencional os limites de risco em `config.yaml`;
+- concluir com sucesso uma pequena execucao em paper mode.
 
-## Run
+## Execucao
 
 ```bash
 python -m app.main dashboard
@@ -91,40 +92,44 @@ python -m app.main reprice
 python -m app.main portfolio
 ```
 
-Scheduler mode starts:
+O modo scheduler inicia:
 
-- scan jobs
-- daily Telegram report at 09:00
-- `/health`
-- `/metrics`
-- `/status`
+- jobs de varredura;
+- relatorio diario no Telegram as 09:00;
+- `/health`;
+- `/metrics`;
+- `/status`.
 
 ## Telegram
 
-The notifier uses `python-telegram-bot` with async API calls. Bot username: `@saldogodaddy_bot`.
+O notificador usa `python-telegram-bot` com chamadas assíncronas de API. Usuario do bot: `@saldogodaddy_bot`.
 
-Supported alerts:
+Alertas suportados:
 
-- startup
-- rebalance execution
-- APY/domain opportunity
-- transaction success/failure
-- critical error
-- daily portfolio summary
+- health check de inicializacao;
+- aprovacao pendente criada;
+- candidato com score >= 90;
+- candidato com liquidez A;
+- risco de marca detectado;
+- limite diario/semanal de orcamento atingido;
+- bloqueios de `SAFE_MODE` e `DRY_RUN_PURCHASES`;
+- excecao critica;
+- deteccao de bot offline;
+- resumo diario de seguranca.
 
-Secrets are loaded from `.env`; tokens are never hardcoded or logged.
+Segredos sao carregados do `.env`; tokens nunca sao hardcoded nem registrados em logs. O Telegram e somente notificacao: comandos via Telegram nao aprovam nem compram dominios.
 
-## PostgreSQL Migration
+## Migracao PostgreSQL
 
-1. Create a database and user.
-2. Set `DATABASE__URL` in `.env`.
-3. Run:
+1. Crie um banco e um usuario.
+2. Defina `DATABASE__URL` no `.env`.
+3. Rode:
 
 ```bash
 python -m app.main dashboard
 ```
 
-The repository creates these tables automatically:
+O repositorio cria automaticamente estas tabelas:
 
 - `scanned_domains`
 - `scored_domains`
@@ -135,11 +140,11 @@ The repository creates these tables automatically:
 - `scheduler_runs`
 - `alert_history`
 
-All scanned domains are persisted, including rejected ones.
+Todos os dominios analisados sao persistidos, inclusive os rejeitados.
 
-## Observability
+## Observabilidade
 
-Structured logs include:
+Logs estruturados incluem:
 
 - `timestamp`
 - `service`
@@ -151,120 +156,120 @@ Structured logs include:
 - `score`
 - `operation_id`
 
-Prometheus-compatible metrics are available at:
+Metricas compativeis com Prometheus ficam disponiveis em:
 
 ```text
 GET /metrics
 ```
 
-Operational status is available at:
+O status operacional fica disponivel em:
 
 ```text
 GET /health
 GET /status
 ```
 
-## Risk Controls
+## Controles de Risco
 
-Configured in `config.yaml`:
+Configurados em `config.yaml`:
 
-- safe mode enabled by default
-- manual approval gate through `data/pending_approvals.json`
-- dry-run purchase audit through `data/purchase_attempts.json`
-- famous-brand and confusing-variation trademark rejection
-- liquidity grade, sale probability, expected holding months, and expected value checks
-- max daily and weekly spend
-- max buys per day
-- max portfolio size
-- cooldown between buys
-- `.com`-only acquisitions unless explicitly allowed
-- max purchase price per domain
-- max daily registrations
-- max capital exposure
-- blacklist
-- minimum score threshold
-- cooldown periods
-- emergency stop
-- dry-run audit mode
+- safe mode ativo por padrao;
+- aprovacao manual por `data/pending_approvals.json`;
+- auditoria de compra dry-run por `data/purchase_attempts.json`;
+- rejeicao de marcas famosas e variacoes confusas;
+- verificacoes de liquidez, probabilidade de venda, meses esperados em carteira e valor esperado;
+- gasto maximo diario e semanal;
+- compras maximas por dia;
+- tamanho maximo de portfolio;
+- cooldown entre compras;
+- aquisicoes somente `.com`, salvo liberacao explicita;
+- preco maximo de compra por dominio;
+- registros maximos por dia;
+- exposicao maxima de capital;
+- blacklist;
+- limiar minimo de score;
+- periodos de cooldown;
+- parada de emergencia;
+- modo de auditoria dry-run.
 
-When `SAFE_MODE=true`, the bot can score, reject, watchlist, and notify, but it will not buy a candidate unless `pending_approvals.json` contains that domain with `approved=true`.
+Quando `SAFE_MODE=true`, o bot pode pontuar, rejeitar, colocar em watchlist e notificar, mas nao compra um candidato a menos que `pending_approvals.json` contenha esse dominio com `approved=true`.
 
-When `DRY_RUN_PURCHASES=true`, even a manually approved live-mode candidate is not sent to GoDaddy. The bot writes the would-buy record to `data/purchase_attempts.json` with domain, price, registrar, approver, timestamp, dry-run block flag, and the policy snapshot that allowed the attempt.
+Quando `DRY_RUN_PURCHASES=true`, mesmo um candidato aprovado manualmente em modo live nao e enviado para GoDaddy. O bot grava o registro de "compraria" em `data/purchase_attempts.json` com dominio, preco, registrador, aprovador, timestamp, flag de bloqueio dry-run e snapshot da politica que permitiu a tentativa.
 
-## Economic Engine
+## Engine Economica
 
-The platform uses an interpretable multi-factor valuation engine instead of a simple heuristic score. It estimates:
+A plataforma usa uma engine de valuation multifator interpretavel em vez de um score heuristico simples. Ela estima:
 
-- fair market value
-- resale probability
-- expected holding time
-- expected ROI
-- liquidity-adjusted ROI
-- time-adjusted ROI
-- purchase confidence
-- recommended listing price
+- valor justo de mercado;
+- probabilidade de revenda;
+- tempo esperado em carteira;
+- ROI esperado;
+- ROI ajustado por liquidez;
+- ROI ajustado por tempo;
+- confianca de compra;
+- preco recomendado de listagem.
 
-Factors include comparable sales, commercial intent, CPC proxy, search demand, TLD quality, linguistic quality, brandability, length, pronounceability, trend momentum, SEO authority, backlink quality, spam safety, trademark safety, archive quality, and liquidity.
+Os fatores incluem vendas comparaveis, intencao comercial, proxy de CPC, demanda de busca, qualidade do TLD, qualidade linguistica, potencial de marca, tamanho, pronunciabilidade, momentum de tendencia, autoridade SEO, qualidade de backlinks, seguranca contra spam, seguranca de marca, qualidade de arquivo historico e liquidez.
 
-Capital allocation rejects acquisitions that would overconcentrate the portfolio by extension or niche, or exceed configured capital exposure.
+A alocacao de capital rejeita aquisicoes que concentrariam demais o portfolio por extensao ou nicho, ou que ultrapassariam a exposicao de capital configurada.
 
-Dynamic pricing uses valuation, keyword value, backlink count, domain age, comparable sales, liquidity, and inventory age. Stale domains are discounted through the repricing engine after 7 days instead of accumulating dead capital indefinitely.
+A precificacao dinamica usa valuation, valor de palavra-chave, backlinks, idade do dominio, vendas comparaveis, liquidez e idade do inventario. Dominios parados sao descontados pela engine de repricing depois de 7 dias, em vez de acumular capital morto indefinidamente.
 
-The live valuation path enriches candidates with:
+O caminho live de valuation enriquece candidatos com:
 
-- Wayback CDX history, first-seen date, and capture density.
-- NameBio comparable sales and keyword/TLD sale averages when `NAMEBIO_EMAIL` and `NAMEBIO_API_KEY` are configured.
-- Backlink counts through `BACKLINK_PROXY_URL`.
+- historico Wayback CDX, primeira data vista e densidade de capturas;
+- vendas comparaveis NameBio e medias por palavra-chave/TLD quando `NAMEBIO_EMAIL` e `NAMEBIO_API_KEY` estao configurados;
+- contagem de backlinks por `BACKLINK_PROXY_URL`.
 
-Paper mode remains deterministic and does not buy or list live assets.
+O paper mode continua deterministico e nao compra nem lista ativos reais.
 
 ## Domain Sniper
 
-`python -m app.main sniper --sniper-cycles 0` runs continuously. The sniper refreshes sources every 30 seconds, watches domains expiring in the next hour, pre-submits a DropCatch backorder when configured, and schedules the registrar registration attempt at the target expiry timestamp with a short retry loop.
+`python -m app.main sniper --sniper-cycles 0` roda continuamente. O sniper atualiza fontes a cada 30 segundos, observa dominios expirando na proxima hora, pre-envia um backorder DropCatch quando configurado e agenda a tentativa de registro no registrador no timestamp alvo de expiracao, com um pequeno loop de retry.
 
-Exact registry availability still depends on registrar/network latency and the upstream drop feed timestamp, so start in paper mode and verify clock sync before using live capital.
+A disponibilidade exata no registro ainda depende de latencia de registrador/rede e do timestamp do feed de drop, entao comece em paper mode e verifique a sincronizacao do relogio antes de usar capital real.
 
-## Portfolio Tracker
+## Rastreador de Portfolio
 
-`python -m app.main portfolio` writes `data/portfolio_report.csv` with:
+`python -m app.main portfolio` grava `data/portfolio_report.csv` com:
 
-- domain
-- cost
-- list price
-- days listed
-- per-domain ROI
-- marketplaces
+- dominio;
+- custo;
+- preco de listagem;
+- dias listado;
+- ROI por dominio;
+- marketplaces.
 
-The dashboard and daily Telegram report include total portfolio value, realized profit, and sold-domain alerts.
+O dashboard e o relatorio diario do Telegram incluem valor total do portfolio, lucro realizado e alertas de dominio vendido.
 
-## Profitability KPIs
+## KPIs de Lucratividade
 
-Track these before increasing live capital:
+Acompanhe estes indicadores antes de aumentar capital live:
 
-- expected ROI vs actual ROI
-- resale probability calibration
-- hit rate
-- average holding days
-- capital utilization
-- ROI by extension
-- ROI by niche
-- ROI by score band
-- false positive rate
-- stale inventory ratio
-- acquisition-to-sale ratio
-- marketplace conversion rate
+- ROI esperado vs ROI real;
+- calibracao da probabilidade de revenda;
+- taxa de acerto;
+- media de dias em carteira;
+- utilizacao de capital;
+- ROI por extensao;
+- ROI por nicho;
+- ROI por faixa de score;
+- taxa de falsos positivos;
+- proporcao de inventario parado;
+- relacao aquisicao-venda;
+- taxa de conversao por marketplace.
 
-## Profitability Traps
+## Armadilhas de Lucratividade
 
-- Buying high-score domains with weak liquidity.
-- Overexposure to `.io`, `.net`, or a single trend.
-- Holding low-quality inventory through renewals.
-- Treating backlinks as value without spam/anchor quality checks.
-- Paying premium acquisition costs for names with long expected hold time.
-- Ignoring trademark-like strings that look brandable but are legal risk.
-- Raising live limits before paper-mode expected-vs-actual calibration.
+- Comprar dominios de score alto com liquidez fraca.
+- Exposicao excessiva a `.io`, `.net` ou a uma unica tendencia.
+- Manter inventario de baixa qualidade ate a renovacao.
+- Tratar backlinks como valor sem checar spam e qualidade de anchor text.
+- Pagar custos premium de aquisicao por nomes com longo prazo esperado em carteira.
+- Ignorar termos parecidos com marcas que parecem bons para branding, mas trazem risco legal.
+- Aumentar limites live antes de calibrar esperado vs real em paper mode.
 
-## Development
+## Desenvolvimento
 
 ```bash
 make install
@@ -273,7 +278,7 @@ make lint
 make typecheck
 ```
 
-Run DB-gated integration tests with:
+Rode testes de integracao dependentes de banco com:
 
 ```bash
 set TEST_DATABASE_URL=postgresql://user:pass@localhost:5432/domain_hunter_test
@@ -287,14 +292,14 @@ docker build -t domain-hunter-bot .
 docker run --env-file .env -p 8080:8080 domain-hunter-bot
 ```
 
-The container runs as a non-root user and exposes port `8080`.
+O container roda como usuario nao-root e expoe a porta `8080`.
 
-## Prioritized Production Rollout
+## Rollout de Producao Priorizado
 
-1. Run in paper mode with PostgreSQL enabled.
-2. Verify `/health`, `/status`, logs, and Telegram startup alerts.
-3. Tune risk limits and blacklist.
-4. Run `run-once` repeatedly and inspect persisted rejected domains and valuations.
-5. Backtest threshold changes before live changes.
-6. Enable live mode with `max_daily_registrations=1`.
-7. Gradually raise capital exposure only after profitable validation.
+1. Rode em paper mode com PostgreSQL ativo.
+2. Verifique `/health`, `/status`, logs e alertas de inicializacao no Telegram.
+3. Ajuste limites de risco e blacklist.
+4. Rode `run-once` repetidamente e inspecione dominios rejeitados e valuations persistidos.
+5. Faca backtest de mudancas de limiar antes de alteracoes live.
+6. Ative modo live com `max_daily_registrations=1`.
+7. Aumente gradualmente a exposicao de capital somente depois de validacao lucrativa.

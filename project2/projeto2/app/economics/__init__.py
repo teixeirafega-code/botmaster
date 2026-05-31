@@ -1,2 +1,1 @@
-"""Profitability and valuation layer."""
-
+"""Camada de lucratividade e valuation."""

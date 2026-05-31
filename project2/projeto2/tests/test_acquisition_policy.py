@@ -130,7 +130,7 @@ async def test_safe_mode_sends_trainedrunner_to_pending_approval(tmp_path):
     approvals = json.loads(settings.pending_approvals_file.read_text(encoding="utf-8"))
     assert approvals["trainedrunner.com"]["approved"] is False
     assert approvals["trainedrunner.com"]["reason"] == "manual_approval_required"
-    assert any("Pending approval created" in alert[1] for alert in repository.alerts)
+    assert any("Aprovacao pendente criada" in alert[1] for alert in repository.alerts)
     assert await repository.list_managed_domains() == []
 
 

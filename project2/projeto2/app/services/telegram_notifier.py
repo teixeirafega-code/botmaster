@@ -121,20 +121,20 @@ class TelegramNotifier:
         if self._startup_health_sent or not self.enabled:
             return False
         self._startup_health_sent = True
-        safe_mode = "ON" if self.settings.safe_mode else "OFF"
-        dry_run = "ON" if self.settings.dry_run_purchases else "OFF"
+        safe_mode = "ATIVO" if self.settings.safe_mode else "INATIVO"
+        dry_run = "ATIVO" if self.settings.dry_run_purchases else "INATIVO"
         message = (
-            "✅ Domain Hunter started successfully.\n"
+            "\u2705 Domain Hunter iniciado com sucesso.\n"
             f"SAFE_MODE={safe_mode}\n"
             f"DRY_RUN_PURCHASES={dry_run}\n"
-            f"Timestamp: {datetime.now(UTC).isoformat()}"
+            f"Horario: {datetime.now(UTC).isoformat()}"
         )
         return await self.send_alert("startup_health_check", message)
 
     async def send_bot_restart_alert(self, message: str = "Domain Hunter Bot restarted") -> bool:
         alert = (
-            f"Bot restart\n{message}\n"
-            f"Paper mode: {self.settings.paper_mode}\n"
+            f"Reinicio do bot\n{message}\n"
+            f"Modo simulado: {self.settings.paper_mode}\n"
             f"SAFE_MODE: {self.settings.safe_mode}\n"
             f"DRY_RUN_PURCHASES: {self.settings.dry_run_purchases}"
         )
@@ -145,12 +145,12 @@ class TelegramNotifier:
 
     async def send_rebalance_alert(self, summary: str, metadata: dict[str, Any] | None = None) -> bool:
         details = self._format_metadata(metadata)
-        return await self.send_alert("critical_exception", f"Rebalance alert\n{summary}{details}")
+        return await self.send_alert("critical_exception", f"Alerta de rebalanceamento\n{summary}{details}")
 
     async def send_apy_opportunity_alert(self, domain: str, score: int, estimated_price: int) -> bool:
         return await self.send_alert(
             "real_purchase",
-            f"Real purchase/listing event\nDomain: {domain}\nScore: {score}\nTarget list price: ${estimated_price}",
+            f"Evento de compra/listagem real\nDominio: {domain}\nScore: {score}\nPreco alvo de listagem: ${estimated_price}",
         )
 
     async def send_manual_approval_alert(
@@ -162,29 +162,29 @@ class TelegramNotifier:
     ) -> bool:
         return await self.send_alert(
             "pending_approval_created",
-            "Pending approval created\n"
-            f"Domain: {domain}\n"
+            "Aprovacao pendente criada\n"
+            f"Dominio: {domain}\n"
             f"Score: {score}\n"
-            f"Purchase price: ${purchase_price:.2f}\n"
-            f"Expected value: ${valuation.expected_value:.2f}\n"
-            f"Sale probability: {valuation.sale_probability:.1%}\n"
-            f"Liquidity: {valuation.liquidity_grade}\n"
-            f"Trademark risk: {valuation.trademark_risk}\n"
-            f"Approval file: {self.settings.pending_approvals_file}\n"
-            "Notifications only. Telegram commands cannot approve or buy domains.",
+            f"Preco de compra: ${purchase_price:.2f}\n"
+            f"Valor esperado: ${valuation.expected_value:.2f}\n"
+            f"Probabilidade de venda: {valuation.sale_probability:.1%}\n"
+            f"Liquidez: {valuation.liquidity_grade}\n"
+            f"Risco de marca: {valuation.trademark_risk}\n"
+            f"Arquivo de aprovacao: {self.settings.pending_approvals_file}\n"
+            "Apenas notificacoes. Comandos do Telegram nao podem aprovar nem comprar dominios.",
         )
 
     async def send_candidate_signal_alert(self, event_type: str, domain: str, score: int, valuation: ValuationResult) -> bool:
-        label = "High-score candidate" if event_type == "score_90_candidate" else "Liquidity grade A candidate"
+        label = "Candidato com score alto" if event_type == "score_90_candidate" else "Candidato com liquidez A"
         return await self.send_alert(
             event_type,
             f"{label}\n"
-            f"Domain: {domain}\n"
+            f"Dominio: {domain}\n"
             f"Score: {score}\n"
-            f"Liquidity: {valuation.liquidity_grade}\n"
-            f"Expected value: ${valuation.expected_value:.2f}\n"
-            f"Sale probability: {valuation.sale_probability:.1%}\n"
-            "Notifications only. No Telegram approval commands are accepted.",
+            f"Liquidez: {valuation.liquidity_grade}\n"
+            f"Valor esperado: ${valuation.expected_value:.2f}\n"
+            f"Probabilidade de venda: {valuation.sale_probability:.1%}\n"
+            "Apenas notificacoes. Nenhum comando de aprovacao via Telegram e aceito.",
         )
 
     async def send_policy_block_alert(
@@ -197,27 +197,27 @@ class TelegramNotifier:
         price: float | None = None,
         valuation: ValuationResult | None = None,
     ) -> bool:
-        price_line = f"\nPrice: ${price:.2f}" if price is not None else ""
+        price_line = f"\nPreco: ${price:.2f}" if price is not None else ""
         valuation_line = (
-            f"\nLiquidity: {valuation.liquidity_grade}\nExpected value: ${valuation.expected_value:.2f}"
+            f"\nLiquidez: {valuation.liquidity_grade}\nValor esperado: ${valuation.expected_value:.2f}"
             if valuation is not None
             else ""
         )
         return await self.send_alert(
             event_type,
-            f"Policy block\nDomain: {domain}\nScore: {score}\nReason: {reason}{price_line}{valuation_line}",
+            f"Bloqueio de politica\nDominio: {domain}\nScore: {score}\nMotivo: {reason}{price_line}{valuation_line}",
         )
 
     async def send_safe_mode_block_alert(self, domain: str, score: int) -> bool:
         return await self.send_alert(
             "safe_mode_block",
-            f"SAFE_MODE block\nDomain: {domain}\nScore: {score}\nManual approval file required. Telegram cannot approve or buy.",
+            f"Bloqueio por SAFE_MODE\nDominio: {domain}\nScore: {score}\nArquivo de aprovacao manual obrigatorio. Telegram nao pode aprovar nem comprar.",
         )
 
     async def send_dry_run_block_alert(self, domain: str, score: int, price: float, registrar: str) -> bool:
         return await self.send_alert(
             "dry_run_block",
-            f"DRY_RUN block\nDomain: {domain}\nScore: {score}\nPrice: ${price:.2f}\nRegistrar: {registrar}\nNo purchase API was called.",
+            f"Bloqueio por DRY_RUN\nDominio: {domain}\nScore: {score}\nPreco: ${price:.2f}\nRegistrador: {registrar}\nNenhuma API de compra foi chamada.",
         )
 
     async def send_error(self, title: str, error: Exception | str, *, critical: bool = False) -> bool:
@@ -237,46 +237,46 @@ class TelegramNotifier:
     ) -> bool:
         if success:
             return False
-        price_line = f"\nPrice: ${price}" if price is not None else ""
-        reason_line = f"\nReason: {reason}" if reason else ""
+        price_line = f"\nPreco: ${price}" if price is not None else ""
+        reason_line = f"\nMotivo: {reason}" if reason else ""
         return await self.send_alert(
             f"transaction_failure:{action}",
-            f"Transaction FAILED\nAction: {action}\nDomain: {domain}{price_line}{reason_line}",
+            f"Transacao FALHOU\nAcao: {action}\nDominio: {domain}{price_line}{reason_line}",
         )
 
     async def send_sale_alert(self, domain: ManagedDomain) -> bool:
         profit = domain.sale_price - domain.acquisition_cost
         return await self.send_alert(
             "domain_sold",
-            f"Domain sold\nDomain: {domain.name}\nSale price: ${domain.sale_price:.2f}\nCost: ${domain.acquisition_cost:.2f}\nProfit: ${profit:.2f}",
+            f"Dominio vendido\nDominio: {domain.name}\nPreco de venda: ${domain.sale_price:.2f}\nCusto: ${domain.acquisition_cost:.2f}\nLucro: ${profit:.2f}",
         )
 
     async def send_daily_report(self, domains: list[ManagedDomain]) -> bool:
         snapshot = ProfitTracker().snapshot(domains)
         return await self.send_alert(
             "daily_summary",
-            "Daily portfolio summary\n"
-            f"Domains monitored: {snapshot['domains_monitored']}\n"
-            f"Registered: {snapshot['registered']}\n"
-            f"Sold: {snapshot['sold']}\n"
-            f"Total invested: ${snapshot['total_invested']}\n"
-            f"Total profit: ${snapshot['total_profit']}\n"
-            f"Portfolio value: ${snapshot['total_portfolio_value']}",
+            "Resumo diario do portfolio\n"
+            f"Dominios monitorados: {snapshot['domains_monitored']}\n"
+            f"Registrados: {snapshot['registered']}\n"
+            f"Vendidos: {snapshot['sold']}\n"
+            f"Total investido: ${snapshot['total_invested']}\n"
+            f"Lucro total: ${snapshot['total_profit']}\n"
+            f"Valor do portfolio: ${snapshot['total_portfolio_value']}",
             disable_notification=True,
         )
 
     async def send_domain_daily_summary(self, summary: dict[str, Any]) -> bool:
         return await self.send_alert(
             "daily_summary",
-            "Daily Domain Hunter summary\n"
-            f"Domains scanned: {summary.get('domains_scanned', 0)}\n"
-            f"Opportunities found: {summary.get('opportunities_found', 0)}\n"
-            f"Pending approvals: {summary.get('pending_approvals', 0)}\n"
-            f"Trademark blocks: {summary.get('trademark_blocks', 0)}\n"
-            f"Liquidity blocks: {summary.get('liquidity_blocks', 0)}\n"
-            f"Budget blocks: {summary.get('budget_blocks', 0)}\n"
-            f"Manual approvals: {summary.get('manual_approvals', 0)}\n"
-            f"Real purchases: {summary.get('real_purchases', 0)}",
+            "Resumo diario do Domain Hunter\n"
+            f"Dominios analisados: {summary.get('domains_scanned', 0)}\n"
+            f"Oportunidades encontradas: {summary.get('opportunities_found', 0)}\n"
+            f"Aprovacoes pendentes: {summary.get('pending_approvals', 0)}\n"
+            f"Bloqueios por marca: {summary.get('trademark_blocks', 0)}\n"
+            f"Bloqueios por liquidez: {summary.get('liquidity_blocks', 0)}\n"
+            f"Bloqueios por orcamento: {summary.get('budget_blocks', 0)}\n"
+            f"Aprovacoes manuais: {summary.get('manual_approvals', 0)}\n"
+            f"Compras reais: {summary.get('real_purchases', 0)}",
             disable_notification=True,
         )
 

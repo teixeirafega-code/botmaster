@@ -214,7 +214,7 @@ def _yield_card(process_lines: list[str], now: datetime) -> dict[str, Any]:
         "simulated_balance": capital_usd + (simulated_profit or 0.0),
         "potential_profit": estimated_monthly_profit,
         "opportunities_today": 0,
-        "best_protocol": _title(best_protocol_name) if best_protocol_name else "No APY data",
+        "best_protocol": _title(best_protocol_name) if best_protocol_name else "Sem dados de APY",
         "best_apy": best_apy,
         "best_apy_label": _format_percent(best_apy),
         "estimated_monthly_profit": estimated_monthly_profit,
@@ -222,14 +222,14 @@ def _yield_card(process_lines: list[str], now: datetime) -> dict[str, Any]:
         "capital_label": _format_money(capital_usd),
         "next_scan": next_scan,
         "chart": {
-            "label": "Best APY last 24h",
+            "label": "Melhor APY nas ultimas 24h",
             "points": chart_points,
         },
         "metrics": [
-            {"label": "Best protocol", "value": _title(best_protocol_name) if best_protocol_name else "No APY data", "tone": "good"},
-            {"label": "Monthly profit", "value": _format_money(estimated_monthly_profit), "tone": "good" if estimated_monthly_profit > 0 else "warning"},
-            {"label": "Simulated profit", "value": _format_money(simulated_profit)},
-            {"label": "Next scan", "value": next_scan["label"], "tone": next_scan["tone"]},
+            {"label": "Melhor protocolo", "value": _title(best_protocol_name) if best_protocol_name else "Sem dados de APY", "tone": "good"},
+            {"label": "Lucro mensal", "value": _format_money(estimated_monthly_profit), "tone": "good" if estimated_monthly_profit > 0 else "warning"},
+            {"label": "Lucro simulado", "value": _format_money(simulated_profit)},
+            {"label": "Proxima varredura", "value": next_scan["label"], "tone": next_scan["tone"]},
         ],
         "apys": [
             {"protocol": "Aave", "value": _format_percent(current_apys.get("aave")), "raw": current_apys.get("aave"), "is_best": best_protocol_name == "aave"},
@@ -335,10 +335,10 @@ def _domain_card(process_lines: list[str], now: datetime) -> dict[str, Any]:
             "portfolio_value_label": _format_money(portfolio_value),
         },
         "metrics": [
-            {"label": "Domains scanned today", "value": _format_int(scanned_today), "tone": "neutral"},
-            {"label": "Opportunities found", "value": _format_int(opportunities_today), "tone": "good" if opportunities_today else "warning"},
-            {"label": "Last domain registered", "value": last_registered or "No registration in logs"},
-            {"label": "Portfolio value", "value": _format_money(portfolio_value), "tone": "good" if portfolio_value else "warning"},
+            {"label": "Dominios analisados hoje", "value": _format_int(scanned_today), "tone": "neutral"},
+            {"label": "Oportunidades encontradas", "value": _format_int(opportunities_today), "tone": "good" if opportunities_today else "warning"},
+            {"label": "Ultimo dominio registrado", "value": last_registered or "Nenhum registro nos logs"},
+            {"label": "Valor do portfolio", "value": _format_money(portfolio_value), "tone": "good" if portfolio_value else "warning"},
         ],
         "details": [],
     }
@@ -389,12 +389,12 @@ def _domain_safety_panel(now: datetime, shared_statuses: dict[str, dict[str, Any
     dry_run_purchases = _domain_safety_bool(root, metrics, "dry_run_purchases", "DRY_RUN_PURCHASES", "dry_run_purchases", True)
 
     return {
-        "title": "Domain Hunter Safety",
+        "title": "Seguranca do Domain Hunter",
         "safe_mode": safe_mode,
-        "safe_mode_label": "ON" if safe_mode else "OFF",
+        "safe_mode_label": "ATIVO" if safe_mode else "INATIVO",
         "safe_mode_tone": "good" if safe_mode else "danger",
         "dry_run_purchases": dry_run_purchases,
-        "dry_run_purchases_label": "ON" if dry_run_purchases else "OFF",
+        "dry_run_purchases_label": "ATIVO" if dry_run_purchases else "INATIVO",
         "dry_run_purchases_tone": "good" if dry_run_purchases else "danger",
         "counts": {
             "pending_approvals": len(pending),
@@ -414,22 +414,22 @@ def _domain_safety_panel(now: datetime, shared_statuses: dict[str, dict[str, Any
         },
         "kpis": [
             {
-                "label": "Approval Quality Score",
+                "label": "Qualidade da Aprovacao",
                 "value": f"{approval_quality:.0f}%",
                 "tone": "good" if approval_quality >= 85 else "warning" if approval_quality >= 60 else "danger",
             },
             {
-                "label": "Trademark Risk Avoided",
+                "label": "Risco de Marca Evitado",
                 "value": _format_int(blocked_counts["trademark"]),
                 "tone": "good" if blocked_counts["trademark"] else "neutral",
             },
             {
-                "label": "Capital Protected",
+                "label": "Capital Protegido",
                 "value": _format_money(capital_protected),
                 "tone": "good" if capital_protected else "neutral",
             },
             {
-                "label": "Domains Reviewed",
+                "label": "Dominios Revisados",
                 "value": _format_int(len(reviewed_domains)),
                 "tone": "good" if reviewed_domains else "warning",
             },
@@ -438,9 +438,9 @@ def _domain_safety_panel(now: datetime, shared_statuses: dict[str, dict[str, Any
             "rejection_reasons": _rejection_chart(reason_counts),
             "pending_over_time": _pending_over_time(pending, now),
             "approval_rate": [
-                {"label": "Approved", "value": len(approved), "tone": "good"},
-                {"label": "Pending", "value": len(pending), "tone": "warning"},
-                {"label": "Rate", "value": round(approval_rate * 100, 2), "tone": "good" if approval_rate >= 0.5 else "warning"},
+                {"label": "Aprovados", "value": len(approved), "tone": "good"},
+                {"label": "Pendentes", "value": len(pending), "tone": "warning"},
+                {"label": "Taxa", "value": round(approval_rate * 100, 2), "tone": "good" if approval_rate >= 0.5 else "warning"},
             ],
         },
     }
@@ -500,14 +500,14 @@ def _generate_domain_validation_report(now: datetime) -> dict[str, Any]:
         "sold_domains": len(sold_domains),
     }
     report = {
-        "report_name": "Domain Hunter 7-Day Validation Report",
+        "report_name": "Relatorio de Validacao de 7 Dias do Domain Hunter",
         "generated_at": now.isoformat(),
         "period_start": cutoff.isoformat(),
         "period_end": now.isoformat(),
         "requested_days": 7,
         "observed_days": round(observed_days, 2),
         "partial": partial,
-        "partial_reason": "Fewer than 7 days of timestamped Domain Hunter data were found." if partial else "",
+        "partial_reason": "Foram encontrados menos de 7 dias de dados com timestamp do Domain Hunter." if partial else "",
         "safety_rules": {
             "never_triggers_real_purchases": True,
             "dry_run_attempts_counted_as_real_purchases": False,
@@ -545,26 +545,26 @@ def _pending_validation_review(item: dict[str, Any], now: datetime, root: Path) 
 
     if trademark_risk:
         final_decision = "reject"
-        reviewer_notes = "Auto-review: trademark risk remains present after the validation window."
+        reviewer_notes = "Revisao automatica: o risco de marca continua presente depois da janela de validacao."
     elif not liquidity_ok or not value_ok or not score_ok:
         final_decision = "reject"
-        reviewer_notes = "Auto-review: score, liquidity, or expected value no longer clears the buy policy."
+        reviewer_notes = "Revisao automatica: score, liquidez ou valor esperado nao passam mais pela politica de compra."
     elif reviewed_after_cooldown and still_worth_buying:
         final_decision = "approve"
-        reviewer_notes = "Auto-review: still clears score, liquidity, expected value, and cooldown checks. Manual approval is still required."
+        reviewer_notes = "Revisao automatica: ainda passa nas verificacoes de score, liquidez, valor esperado e cooldown. A aprovacao manual continua obrigatoria."
     else:
         final_decision = "keep watching"
-        reviewer_notes = "Auto-review: candidate still needs more cooldown/observation time before a decision."
+        reviewer_notes = "Revisao automatica: o candidato ainda precisa de mais cooldown/observacao antes de uma decisao."
 
     return {
         "domain": item["domain"],
-        "review_question": "Would I still approve this after 7 days?",
+        "review_question": "Eu ainda aprovaria isto depois de 7 dias?",
         "created_at": created_at.isoformat(),
         "age_days": round(age_days, 2),
         "score": score,
         "expected_value": expected_value,
         "sale_probability": _safe_float(item.get("sale_probability")),
-        "liquidity_grade": liquidity_grade or "unknown",
+        "liquidity_grade": liquidity_grade or "desconhecida",
         "trademark_risk": trademark_risk,
         "reviewed_after_cooldown": reviewed_after_cooldown,
         "still_worth_buying": still_worth_buying,
@@ -576,7 +576,7 @@ def _pending_validation_review(item: dict[str, Any], now: datetime, root: Path) 
 def _domain_validation_report_html(report: dict[str, Any]) -> str:
     summary = report["summary"]
     reviews = report.get("pending_domain_reviews", [])
-    partial_badge = "PARTIAL" if report.get("partial") else "FULL 7 DAYS"
+    partial_badge = "PARCIAL" if report.get("partial") else "7 DIAS COMPLETOS"
     rows = "\n".join(
         "<tr>"
         f"<td>{html.escape(str(item.get('domain', '')))}</td>"
@@ -589,9 +589,20 @@ def _domain_validation_report_html(report: dict[str, Any]) -> str:
         f"<td>{html.escape(str(item.get('reviewer_notes', '')))}</td>"
         "</tr>"
         for item in reviews
-    ) or '<tr><td colspan="8">No pending domains to review.</td></tr>'
+    ) or '<tr><td colspan="8">Nenhum dominio pendente para revisar.</td></tr>'
+    summary_labels = {
+        "opportunities_found": "Oportunidades Encontradas",
+        "pending_approvals": "Aprovacoes Pendentes",
+        "dry_run_purchase_attempts": "Tentativas de Compra Dry-run",
+        "trademark_blocks": "Bloqueios por Marca",
+        "liquidity_blocks": "Bloqueios por Liquidez",
+        "budget_cooldown_blocks": "Bloqueios por Orcamento/Cooldown",
+        "manual_approvals": "Aprovacoes Manuais",
+        "real_purchases": "Compras Reais",
+        "sold_domains": "Dominios Vendidos",
+    }
     summary_cards = "\n".join(
-        f"<div class='card'><span>{html.escape(_title(key))}</span><strong>{html.escape(str(value))}</strong></div>"
+        f"<div class='card'><span>{html.escape(summary_labels.get(key, _title(key)))}</span><strong>{html.escape(str(value))}</strong></div>"
         for key, value in summary.items()
     )
     partial_note = (
@@ -600,11 +611,11 @@ def _domain_validation_report_html(report: dict[str, Any]) -> str:
         else ""
     )
     return f"""<!doctype html>
-<html lang="en">
+<html lang="pt-BR">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Domain Hunter 7-Day Validation Report</title>
+  <title>Relatorio de Validacao de 7 Dias do Domain Hunter</title>
   <style>
     body {{ margin:0; background:#07101b; color:#e5eefb; font-family: Inter, Arial, sans-serif; }}
     main {{ max-width:1180px; margin:0 auto; padding:28px 18px 44px; }}
@@ -625,24 +636,24 @@ def _domain_validation_report_html(report: dict[str, Any]) -> str:
 <body>
   <main>
     <span class="badge">{html.escape(partial_badge)}</span>
-    <h1>Domain Hunter 7-Day Validation Report</h1>
-    <p class="muted">Generated at {html.escape(str(report.get('generated_at')))}. Period: {html.escape(str(report.get('period_start')))} to {html.escape(str(report.get('period_end')))}.</p>
+    <h1>Relatorio de Validacao de 7 Dias do Domain Hunter</h1>
+    <p class="muted">Gerado em {html.escape(str(report.get('generated_at')))}. Periodo: {html.escape(str(report.get('period_start')))} ate {html.escape(str(report.get('period_end')))}.</p>
     {partial_note}
-    <p class="muted">This report never triggers real purchases. Dry-run attempts are not counted as real purchases, and pending approvals are not owned domains.</p>
+    <p class="muted">Este relatorio nunca dispara compras reais. Tentativas em dry-run nao contam como compras reais, e aprovacoes pendentes nao sao dominios possuidos.</p>
     <section class="grid">{summary_cards}</section>
-    <h2>Pending Domain Review</h2>
-    <p class="muted">Review question for each pending domain: Would I still approve this after 7 days?</p>
+    <h2>Revisao de Dominios Pendentes</h2>
+    <p class="muted">Pergunta de revisao para cada dominio pendente: eu ainda aprovaria isto depois de 7 dias?</p>
     <table>
       <thead>
         <tr>
-          <th>Domain</th>
-          <th>Age Days</th>
-          <th>Liquidity</th>
-          <th>Expected Value</th>
-          <th>After Cooldown</th>
-          <th>Still Worth Buying</th>
-          <th>Final Decision</th>
-          <th>Reviewer Notes</th>
+          <th>Dominio</th>
+          <th>Dias</th>
+          <th>Liquidez</th>
+          <th>Valor Esperado</th>
+          <th>Apos Cooldown</th>
+          <th>Ainda Vale Comprar</th>
+          <th>Decisao Final</th>
+          <th>Notas do Revisor</th>
         </tr>
       </thead>
       <tbody>{rows}</tbody>
@@ -1026,9 +1037,9 @@ def _asset_card(process_lines: list[str], now: datetime) -> dict[str, Any]:
         "score_filter_min": 70,
         "top_opportunities": top_opportunities[:12],
         "metrics": [
-            {"label": "Assets scanned", "value": _format_int(assets_scanned), "tone": "neutral"},
-            {"label": "Opportunities found", "value": _format_int(opportunities), "tone": "good" if opportunities else "warning"},
-            {"label": "Total potential profit", "value": _format_money(total_profit), "tone": "good" if total_profit else "warning"},
+            {"label": "Ativos analisados", "value": _format_int(assets_scanned), "tone": "neutral"},
+            {"label": "Oportunidades encontradas", "value": _format_int(opportunities), "tone": "good" if opportunities else "warning"},
+            {"label": "Lucro potencial total", "value": _format_money(total_profit), "tone": "good" if total_profit else "warning"},
         ],
         "details": [
             {"label": item["name"], "value": item["profit_label"]}
@@ -1059,11 +1070,11 @@ def _trend_card(process_lines: list[str], now: datetime) -> dict[str, Any]:
         "opportunities_today": trends_today or 0,
         "top_trends": [_trend_display_item(topic) for topic in top_topics[:5]],
         "metrics": [
-            {"label": "Trends detected today", "value": _format_int(trends_today), "tone": "good" if trends_today else "warning"},
-            {"label": "Top score", "value": _format_score(top_score), "tone": _score_tone(top_score)},
+            {"label": "Tendencias detectadas hoje", "value": _format_int(trends_today), "tone": "good" if trends_today else "warning"},
+            {"label": "Maior score", "value": _format_score(top_score), "tone": _score_tone(top_score)},
         ],
         "details": [
-            {"label": topic.get("name", "Unknown trend"), "value": _format_score(topic.get("score"))}
+            {"label": topic.get("name", "Tendencia desconhecida"), "value": _format_score(topic.get("score"))}
             for topic in top_topics[:5]
         ],
     }
@@ -1217,10 +1228,10 @@ def _yield_apy_chart_points(state: dict[str, Any], now: datetime) -> list[dict[s
 def _yield_next_scan(root: Path, last_update: datetime | None, now: datetime) -> dict[str, Any]:
     interval = _read_config_number(root / "config.yaml", "monitor_interval_seconds", 60)
     if not last_update:
-        return {"label": "Ready now", "seconds": 0, "tone": "good"}
+        return {"label": "Pronto agora", "seconds": 0, "tone": "good"}
     remaining = int((last_update.astimezone(timezone.utc).timestamp() + interval) - now.timestamp())
     if remaining <= 0:
-        return {"label": "Ready now", "seconds": 0, "tone": "good"}
+        return {"label": "Pronto agora", "seconds": 0, "tone": "good"}
     return {"label": _human_duration(remaining), "seconds": remaining, "tone": "warning" if remaining > 30 else "good"}
 
 
@@ -1305,7 +1316,7 @@ def _trend_display_item(topic: dict[str, Any]) -> dict[str, Any]:
     platforms = topic.get("platforms") if isinstance(topic.get("platforms"), list) else []
     velocity = _trend_velocity(score, growth_velocity)
     return {
-        "name": str(topic.get("name") or "Unknown trend")[:150],
+        "name": str(topic.get("name") or "Tendencia desconhecida")[:150],
         "score": score,
         "score_label": _format_score(score),
         "score_width": max(3, min(100, score)),
@@ -1322,10 +1333,10 @@ def _trend_display_item(topic: dict[str, Any]) -> dict[str, Any]:
 def _trend_velocity(score: float, growth_velocity: float | None) -> dict[str, str]:
     velocity = growth_velocity if growth_velocity is not None else score
     if velocity >= 100 or score >= 80:
-        return {"label": "SURGING", "tone": "good"}
+        return {"label": "DISPARANDO", "tone": "good"}
     if velocity >= 50 or score >= 60:
-        return {"label": "RISING", "tone": "warning"}
-    return {"label": "WATCH", "tone": "danger"}
+        return {"label": "SUBINDO", "tone": "warning"}
+    return {"label": "OBSERVAR", "tone": "danger"}
 
 
 def _platform_badges(platforms: list[Any]) -> list[dict[str, str]]:
@@ -1341,7 +1352,7 @@ def _platform_badges(platforms: list[Any]) -> list[dict[str, str]]:
     for platform in platforms:
         key = str(platform).lower()
         badges.append({"label": labels.get(key, key[:2].upper()), "name": _title(key)})
-    return badges or [{"label": "NA", "name": "Unknown"}]
+    return badges or [{"label": "NA", "name": "Desconhecido"}]
 
 
 def _score_tone(score: float | None) -> str:
@@ -1558,7 +1569,7 @@ def _format_score(value: Any) -> str:
 
 def _format_dt(value: datetime | None) -> str:
     if not value:
-        return "No data"
+        return "Sem dados"
     return value.astimezone().strftime("%Y-%m-%d %H:%M:%S")
 
 
@@ -1670,7 +1681,7 @@ def _merge_shared_statuses(
         _apply_shared_metrics(card, metrics)
         if status.get("error"):
             details = card.setdefault("details", [])
-            details.insert(0, {"label": "Last error", "value": str(status["error"])[:140]})
+            details.insert(0, {"label": "Ultimo erro", "value": str(status["error"])[:140]})
     return cards
 
 
@@ -1697,38 +1708,38 @@ def _apply_shared_metrics(card: dict[str, Any], metrics: dict[str, Any]) -> None
                     item["is_best"] = str(item.get("protocol", "")).lower() == best[0]
         if metrics.get("best_protocol"):
             card["best_protocol"] = _title(str(metrics.get("best_protocol")))
-            _replace_metric(card, "Best protocol", card["best_protocol"], "good")
+            _replace_metric(card, "Melhor protocolo", card["best_protocol"], "good")
         if "simulated_profit" in metrics:
-            _replace_metric(card, "Simulated profit", _format_money(_safe_float(metrics.get("simulated_profit"))))
+            _replace_metric(card, "Lucro simulado", _format_money(_safe_float(metrics.get("simulated_profit"))))
     elif bot_id == "domain":
         if "domains_scanned_today" in metrics:
-            _replace_metric(card, "Domains scanned today", _format_int(_safe_float(metrics.get("domains_scanned_today"))))
+            _replace_metric(card, "Dominios analisados hoje", _format_int(_safe_float(metrics.get("domains_scanned_today"))))
         if "opportunities_found" in metrics:
             opportunities = _safe_float(metrics.get("opportunities_found"))
             card["opportunities_today"] = int(opportunities or 0)
-            _replace_metric(card, "Opportunities found", _format_int(opportunities), "good" if opportunities else "warning")
+            _replace_metric(card, "Oportunidades encontradas", _format_int(opportunities), "good" if opportunities else "warning")
         if "domains_registered" in metrics:
             registered = int(_safe_float(metrics.get("domains_registered")) or 0)
             card.setdefault("inventory", {})["registered"] = registered
             card["inventory"]["registered_label"] = _format_int(registered)
         if metrics.get("last_domain_registered"):
-            _replace_metric(card, "Last domain registered", str(metrics.get("last_domain_registered")))
+            _replace_metric(card, "Ultimo dominio registrado", str(metrics.get("last_domain_registered")))
     elif bot_id == "asset":
         if "assets_scanned" in metrics:
-            _replace_metric(card, "Assets scanned", _format_int(_safe_float(metrics.get("assets_scanned"))))
+            _replace_metric(card, "Ativos analisados", _format_int(_safe_float(metrics.get("assets_scanned"))))
         if "opportunities_found" in metrics:
             opportunities = _safe_float(metrics.get("opportunities_found"))
-            _replace_metric(card, "Opportunities found", _format_int(opportunities), "good" if opportunities else "warning")
+            _replace_metric(card, "Oportunidades encontradas", _format_int(opportunities), "good" if opportunities else "warning")
         if "total_potential_profit" in metrics:
             total_profit = _safe_float(metrics.get("total_potential_profit"))
             if total_profit is not None and total_profit > (card.get("potential_profit") or 0):
                 card["potential_profit"] = total_profit
-                _replace_metric(card, "Total potential profit", _format_money(total_profit), "good" if total_profit else "warning")
+                _replace_metric(card, "Lucro potencial total", _format_money(total_profit), "good" if total_profit else "warning")
     elif bot_id == "trend":
         if "trends_detected_today" in metrics:
             trends = _safe_float(metrics.get("trends_detected_today"))
             card["opportunities_today"] = int(trends or 0)
-            _replace_metric(card, "Trends detected today", _format_int(trends), "good" if trends else "warning")
+            _replace_metric(card, "Tendencias detectadas hoje", _format_int(trends), "good" if trends else "warning")
         topics = metrics.get("top_topics")
         if isinstance(topics, list):
             display_topics = [_trend_display_item(topic) for topic in topics[:5] if isinstance(topic, dict)]
@@ -1757,25 +1768,25 @@ def _build_summary(cards: list[dict[str, Any]], now: datetime) -> list[dict[str,
     uptime_seconds = max(0, int((now - APP_STARTED_AT).total_seconds()))
     return [
         {
-            "label": "Total Simulated Balance",
+            "label": "Saldo Simulado Total",
             "value": _format_money(total_balance),
-            "caption": "Paper capital plus marked portfolio value",
+            "caption": "Capital em paper mais valor marcado do portfolio",
             "tone": "good" if total_balance > 0 else "warning",
         },
         {
-            "label": "Total Opportunities Today",
+            "label": "Oportunidades Totais Hoje",
             "value": _format_int(total_opportunities),
-            "caption": "Domains, assets and trends detected",
+            "caption": "Dominios, ativos e tendencias detectados",
             "tone": "good" if total_opportunities else "warning",
         },
         {
-            "label": "Total Potential Profit",
+            "label": "Lucro Potencial Total",
             "value": _format_money(total_profit),
-            "caption": "Modeled upside from active signals",
+            "caption": "Potencial modelado a partir dos sinais ativos",
             "tone": "good" if total_profit > 0 else "warning",
         },
         {
-            "label": "Uptime",
+            "label": "Tempo Online",
             "value": _human_duration(uptime_seconds),
             "caption": f"{running}/{len(cards)} bots online",
             "tone": "good" if running == len(cards) else "danger" if running == 0 else "warning",
@@ -1893,10 +1904,10 @@ def _notify_domain_offline_if_needed(cards: list[dict[str, Any]]) -> None:
         return
     _dashboard_telegram_alert(
         "bot_offline_detection",
-        "Bot offline detection\n"
+        "Deteccao de bot offline\n"
         "Bot: Domain Hunter\n"
         f"Status: {domain_card.get('status', 'UNKNOWN')}\n"
-        f"Last update: {domain_card.get('last_update', 'Unknown')}",
+        f"Ultima atualizacao: {domain_card.get('last_update', 'Desconhecida')}",
     )
 
 
@@ -2027,10 +2038,10 @@ def _bot_supervisor(bot_id: str, name: str, root: Path) -> None:
         if bot_id == "domain":
             _dashboard_telegram_alert(
                 "bot_offline_detection",
-                "Bot offline detection\n"
+                "Deteccao de bot offline\n"
                 f"Bot: {name}\n"
                 "Status: ERROR\n"
-                f"Reason: Bot directory not found: {root}",
+                f"Motivo: diretorio do bot nao encontrado: {root}",
             )
         return
 
@@ -2103,10 +2114,10 @@ def _bot_supervisor(bot_id: str, name: str, root: Path) -> None:
             if bot_id == "domain":
                 _dashboard_telegram_alert(
                     "bot_offline_detection",
-                    "Bot offline detection\n"
+                    "Deteccao de bot offline\n"
                     f"Bot: {name}\n"
                     f"Status: ERROR\n"
-                    f"Reason: {error}",
+                    f"Motivo: {error}",
                 )
             _write_shared_status(
                 {
@@ -2128,9 +2139,9 @@ def _bot_supervisor(bot_id: str, name: str, root: Path) -> None:
             if bot_id == "domain":
                 _dashboard_telegram_alert(
                     "critical_exception",
-                    "Critical exception\n"
+                    "Excecao critica\n"
                     f"Bot: {name}\n"
-                    f"Error: {exc}",
+                    f"Erro: {exc}",
                 )
             _write_shared_status(
                 {

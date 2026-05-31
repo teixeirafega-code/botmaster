@@ -122,30 +122,30 @@ def test_backtesting_stress_test_reports_requested_cost_scenarios(tmp_path):
 
     assert [scenario.scenario for scenario in report.scenarios] == [
         "base",
-        "2x costs",
-        "3x costs",
-        "slippage 10 points",
-        "slippage 15 points",
-        "spread 10 points",
-        "spread 15 points",
+        "2x custos",
+        "3x custos",
+        "slippage 10 pontos",
+        "slippage 15 pontos",
+        "spread 10 pontos",
+        "spread 15 pontos",
     ]
     assert report.profitable_scenarios == (
         "base",
-        "2x costs",
-        "3x costs",
-        "slippage 10 points",
-        "slippage 15 points",
-        "spread 10 points",
-        "spread 15 points",
+        "2x custos",
+        "3x custos",
+        "slippage 10 pontos",
+        "slippage 15 pontos",
+        "spread 10 pontos",
+        "spread 15 pontos",
     )
     assert report.fragile is False
     by_name = {scenario.scenario: scenario for scenario in report.scenarios}
-    assert by_name["slippage 10 points"].net_pnl == 45
-    assert by_name["spread 15 points"].net_pnl == 35
+    assert by_name["slippage 10 pontos"].net_pnl == 45
+    assert by_name["spread 15 pontos"].net_pnl == 35
 
     report_text = (tmp_path / "stress_test_report.txt").read_text(encoding="utf-8")
-    assert "Profitable scenarios: base, 2x costs, 3x costs, slippage 10 points, slippage 15 points, spread 10 points, spread 15 points" in report_text
-    assert "Strategy fragility: ROBUST" in report_text
+    assert "Cenarios lucrativos: base, 2x custos, 3x custos, slippage 10 pontos, slippage 15 pontos, spread 10 pontos, spread 15 pontos" in report_text
+    assert "Fragilidade da estrategia: ROBUSTA" in report_text
 
     with (tmp_path / "stress_test_scenarios.csv").open(encoding="utf-8", newline="") as handle:
         rows = list(csv.DictReader(handle))
@@ -165,11 +165,11 @@ def test_backtesting_stress_test_marks_strategy_fragile_when_modest_costs_remove
 
     by_name = {scenario.scenario: scenario for scenario in report.scenarios}
     assert by_name["base"].profitable is True
-    assert by_name["2x costs"].profitable is False
-    assert by_name["2x costs"].failed_periods == 2
-    assert by_name["2x costs"].failed_period_names == ("2026-01", "2026-02")
+    assert by_name["2x custos"].profitable is False
+    assert by_name["2x custos"].failed_periods == 2
+    assert by_name["2x custos"].failed_period_names == ("2026-01", "2026-02")
     assert report.fragile is True
-    assert "Strategy fragility: FRAGILE" in (tmp_path / "stress_test_report.txt").read_text(encoding="utf-8")
+    assert "Fragilidade da estrategia: FRAGIL" in (tmp_path / "stress_test_report.txt").read_text(encoding="utf-8")
 
 
 def test_dynamic_pricing_discounts_stale_inventory():

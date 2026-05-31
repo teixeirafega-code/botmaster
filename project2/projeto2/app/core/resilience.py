@@ -123,7 +123,7 @@ async def run_resilient(
     provider_lock = resilience_registry.lock(provider)
     async with provider_lock:
         if not breaker.allow_request():
-            raise CircuitBreakerOpen(f"Circuit breaker is open for {provider}")
+            raise CircuitBreakerOpen(f"Circuit breaker esta aberto para {provider}")
 
     last_error: Exception | None = None
     for attempt in range(1, policy.attempts + 1):

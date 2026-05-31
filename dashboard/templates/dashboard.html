@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="en">
+<html lang="pt-BR">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>BotMaster Dashboard</title>
+  <title>Painel BotMaster</title>
   <style>
     :root {
       color-scheme: dark;
@@ -670,15 +670,15 @@
   <main class="shell">
     <header class="topbar">
       <div>
-        <h1>BotMaster Dashboard</h1>
-        <div class="subtle">Last refresh: <span id="generated-at">{{ snapshot.generated_label }}</span></div>
+        <h1>Painel BotMaster</h1>
+        <div class="subtle">Ultima atualizacao: <span id="generated-at">{{ snapshot.generated_label }}</span></div>
       </div>
       <div class="actions">
-        <span class="pill">Auto refresh: 2s</span>
-        <span class="pill"><span id="running-count">{{ snapshot.running_count }}</span> running</span>
-        <span class="pill"><span id="stopped-count">{{ snapshot.stopped_count }}</span> stopped</span>
+        <span class="pill">Atualizacao automatica: 2s</span>
+        <span class="pill"><span id="running-count">{{ snapshot.running_count }}</span> rodando</span>
+        <span class="pill"><span id="stopped-count">{{ snapshot.stopped_count }}</span> parados</span>
         <form method="post" action="{{ url_for('logout') }}">
-          <button class="logout" type="submit">Logout</button>
+          <button class="logout" type="submit">Sair</button>
         </form>
       </div>
     </header>
@@ -689,8 +689,8 @@
 
     <section class="activity">
       <div class="section-title">
-        <span>Activity Feed</span>
-        <span class="badge">Last 20 events</span>
+        <span>Feed de Atividades</span>
+        <span class="badge">Ultimos 20 eventos</span>
       </div>
       <div class="data-list" id="activity-feed"></div>
     </section>
@@ -712,6 +712,13 @@
 
     function toneClass(tone) {
       return tone ? " tone-" + escapeHtml(tone) : "";
+    }
+
+    function statusLabel(status) {
+      if (status === "RUNNING") return "RODANDO";
+      if (status === "STOPPED") return "PARADO";
+      if (status === "ERROR") return "ERRO";
+      return status || "DESCONHECIDO";
     }
 
     function renderSummary(summary) {
@@ -737,7 +744,7 @@
     function chartSvg(points) {
       points = points || [];
       if (points.length < 2) {
-        return '<div class="empty">No APY history</div>';
+        return '<div class="empty">Sem historico de APY</div>';
       }
       var values = points.map(function(point) { return Number(point.value) || 0; });
       var min = Math.min.apply(null, values);
@@ -779,38 +786,38 @@
       var apys = (card.apys || []).map(function(item) {
         return '<div class="apy-row">' +
           '<div class="split"><span class="row-label">' + escapeHtml(item.protocol) + '</span>' +
-          (item.is_best ? '<span class="badge good">BEST</span>' : '') + '</div>' +
+          (item.is_best ? '<span class="badge good">MELHOR</span>' : '') + '</div>' +
           '<div class="row-value' + (item.is_best ? ' tone-good' : '') + '">' + escapeHtml(item.value) + '</div>' +
         '</div>';
       }).join("");
       return renderMetrics(card.metrics) +
-        '<div class="section"><div class="section-title"><span>APY History</span><span class="badge good">' +
+        '<div class="section"><div class="section-title"><span>Historico de APY</span><span class="badge good">' +
         escapeHtml(card.best_protocol) + ' ' + escapeHtml(card.best_apy_label) + '</span></div>' +
         '<div class="chart-wrap">' + chartSvg(card.chart && card.chart.points) + '</div></div>' +
-        '<div class="section"><div class="section-title"><span>APY Comparison</span><span class="badge good">Best protocol</span></div>' +
+        '<div class="section"><div class="section-title"><span>Comparacao de APY</span><span class="badge good">Melhor protocolo</span></div>' +
         renderApyComparison(card.apys) + '</div>' +
-        '<div class="section"><div class="section-title"><span>Protocol APYs</span><span class="badge">' +
-        escapeHtml(card.capital_label || "$140.00") + ' capital</span></div><div class="apy-grid">' + apys + '</div></div>';
+        '<div class="section"><div class="section-title"><span>APYs por Protocolo</span><span class="badge">' +
+        escapeHtml(card.capital_label || "$140.00") + ' de capital</span></div><div class="apy-grid">' + apys + '</div></div>';
     }
 
     function renderDomain(card) {
       var inventory = card.inventory || {};
       var top = (card.top_domains || []).map(function(item) {
         return '<div class="domain-row"><div class="split">' +
-          '<div class="truncate"><strong>' + escapeHtml(item.name) + '</strong><div class="subtle">Estimated sale ' + escapeHtml(item.estimated_sale_price_label) + '</div></div>' +
+          '<div class="truncate"><strong>' + escapeHtml(item.name) + '</strong><div class="subtle">Venda estimada ' + escapeHtml(item.estimated_sale_price_label) + '</div></div>' +
           '<span class="badge ' + escapeHtml(item.tone) + '">' + escapeHtml(item.score_label) + '</span>' +
         '</div></div>';
-      }).join("") || '<div class="empty">No scored domains today</div>';
+      }).join("") || '<div class="empty">Nenhum dominio pontuado hoje</div>';
       return renderMetrics(card.metrics) +
         '<div class="section"><div class="section-title"><span>Portfolio</span><span class="badge good">' +
         escapeHtml(inventory.portfolio_value_label || "$0.00") + '</span></div>' +
         '<div class="mini-stats">' +
-        miniStat("Registered", inventory.registered_label || "0", "good") +
-        miniStat("Listed", inventory.listed_label || "0", "warning") +
-        miniStat("Sold", inventory.sold_label || "0", "good") +
-        miniStat("Value", inventory.portfolio_value_label || "$0.00", "good") +
+        miniStat("Registrados", inventory.registered_label || "0", "good") +
+        miniStat("Listados", inventory.listed_label || "0", "warning") +
+        miniStat("Vendidos", inventory.sold_label || "0", "good") +
+        miniStat("Valor", inventory.portfolio_value_label || "$0.00", "good") +
         '</div></div>' +
-        '<div class="section"><div class="section-title"><span>Top Domains Today</span><span class="badge">Top 5</span></div><div class="data-list">' + top + '</div></div>';
+        '<div class="section"><div class="section-title"><span>Principais Dominios Hoje</span><span class="badge">Top 5</span></div><div class="data-list">' + top + '</div></div>';
     }
 
     function miniStat(label, value, tone) {
@@ -826,14 +833,14 @@
         return '<div class="asset-row">' +
           '<div class="truncate"><a class="asset-link" href="' + escapeHtml(item.url) + '" target="_blank" rel="noopener noreferrer">' +
           escapeHtml(item.name) + '</a><div class="subtle">' + escapeHtml(item.marketplace) + ' | score ' + escapeHtml(item.score_label) + '</div></div>' +
-          '<div><div class="asset-label">Asking</div><strong>' + escapeHtml(item.asking_label) + '</strong></div>' +
-          '<div><div class="asset-label">Real Value</div><strong class="tone-good">' + escapeHtml(item.value_label) + '</strong></div>' +
-          '<div><div class="asset-label">Profit %</div><strong class="tone-good">' + escapeHtml(item.profit_percent_label) + '</strong></div>' +
-          '<a class="link-button" href="' + escapeHtml(item.url) + '" target="_blank" rel="noopener noreferrer">Open</a>' +
+          '<div><div class="asset-label">Pedido</div><strong>' + escapeHtml(item.asking_label) + '</strong></div>' +
+          '<div><div class="asset-label">Valor Real</div><strong class="tone-good">' + escapeHtml(item.value_label) + '</strong></div>' +
+          '<div><div class="asset-label">Lucro %</div><strong class="tone-good">' + escapeHtml(item.profit_percent_label) + '</strong></div>' +
+          '<a class="link-button" href="' + escapeHtml(item.url) + '" target="_blank" rel="noopener noreferrer">Abrir</a>' +
         '</div>';
-      }).join("") || '<div class="empty">No opportunities match this score filter</div>';
+      }).join("") || '<div class="empty">Nenhuma oportunidade corresponde a este filtro de score</div>';
       return renderMetrics(card.metrics) +
-        '<div class="section"><div class="asset-toolbar"><div class="section-title" style="margin:0"><span>Top Opportunities</span></div>' +
+        '<div class="section"><div class="asset-toolbar"><div class="section-title" style="margin:0"><span>Principais Oportunidades</span></div>' +
         '<div class="filter-group" data-filter-group="asset">' +
         filterButton(70) + filterButton(80) + filterButton(90) +
         '</div></div><div class="data-list">' + rows + '</div></div>';
@@ -851,14 +858,14 @@
         }).join("");
         return '<div class="trend-row">' +
           '<div class="split"><div class="truncate"><strong>' + escapeHtml(item.name) + '</strong><div class="subtle">' +
-          'signals ' + escapeHtml(item.signal_count || 0) + '</div></div><div class="platforms">' + badges + '</div></div>' +
+          'sinais ' + escapeHtml(item.signal_count || 0) + '</div></div><div class="platforms">' + badges + '</div></div>' +
           '<div class="score-bar"><div class="score-fill ' + escapeHtml(item.tone) + '" style="width:' + escapeHtml(item.score_width) + '%"></div></div>' +
           '<div class="velocity-line subtle"><span class="badge ' + escapeHtml(item.velocity_tone) + '">' + escapeHtml(item.velocity) + '</span>' +
           '<span>Score <strong class="tone-' + escapeHtml(item.tone) + '">' + escapeHtml(item.score_label) + '</strong></span></div>' +
         '</div>';
-      }).join("") || '<div class="empty">No trend rows available</div>';
+      }).join("") || '<div class="empty">Nenhuma tendencia disponivel</div>';
       return renderMetrics(card.metrics) +
-        '<div class="section"><div class="section-title"><span>Top Trends</span><span class="badge">Reddit / Google / X</span></div><div class="data-list">' + rows + '</div></div>';
+        '<div class="section"><div class="section-title"><span>Principais Tendencias</span><span class="badge">Reddit / Google / X</span></div><div class="data-list">' + rows + '</div></div>';
     }
 
     function renderCard(card) {
@@ -870,8 +877,8 @@
       else body = renderMetrics(card.metrics);
       return '<article class="bot-card accent-' + escapeHtml(card.accent) + '" data-card-id="' + escapeHtml(card.id) + '">' +
         '<div class="card-top"><div class="bot-title"><span class="accent-dot"></span><div><h2>' + escapeHtml(card.name) +
-        '</h2><div class="subtle">Updated: ' + escapeHtml(card.last_update) + '</div></div></div>' +
-        '<span class="status ' + (card.status === "RUNNING" ? "running" : "") + '">' + escapeHtml(card.status) + '</span></div>' +
+        '</h2><div class="subtle">Atualizado: ' + escapeHtml(card.last_update) + '</div></div></div>' +
+        '<span class="status ' + (card.status === "RUNNING" ? "running" : "") + '">' + escapeHtml(statusLabel(card.status)) + '</span></div>' +
         body + '</article>';
     }
 
@@ -880,46 +887,46 @@
       var counts = panel.counts || {};
       var flow = panel.flow || {};
       var charts = panel.charts || {};
-      var html = '<div class="safety-header"><div><h2>Domain Hunter Safety</h2>' +
-        '<div class="subtle">Dry-run attempts are not real purchases. Pending approvals are not owned domains.</div></div>' +
+      var html = '<div class="safety-header"><div><h2>Seguranca do Domain Hunter</h2>' +
+        '<div class="subtle">Tentativas em dry-run nao sao compras reais. Aprovacoes pendentes nao sao dominios possuidos.</div></div>' +
         '<div class="safety-statuses">' +
-        '<span class="badge ' + escapeHtml(panel.safe_mode_tone || "warning") + '">SAFE_MODE ' + escapeHtml(panel.safe_mode_label || "UNKNOWN") + '</span>' +
-        '<span class="badge ' + escapeHtml(panel.dry_run_purchases_tone || "warning") + '">DRY_RUN_PURCHASES ' + escapeHtml(panel.dry_run_purchases_label || "UNKNOWN") + '</span>' +
-        '<button class="safety-button" type="button" data-generate-domain-report>Generate 7-day Validation Report</button>' +
+        '<span class="badge ' + escapeHtml(panel.safe_mode_tone || "warning") + '">SAFE_MODE ' + escapeHtml(panel.safe_mode_label || "DESCONHECIDO") + '</span>' +
+        '<span class="badge ' + escapeHtml(panel.dry_run_purchases_tone || "warning") + '">DRY_RUN_PURCHASES ' + escapeHtml(panel.dry_run_purchases_label || "DESCONHECIDO") + '</span>' +
+        '<button class="safety-button" type="button" data-generate-domain-report>Gerar Relatorio de Validacao de 7 Dias</button>' +
         '<div class="report-status">' + escapeHtml(domainValidationReportStatus) + '</div>' +
         '</div></div>' +
-        '<div class="section"><div class="section-title"><span>Review Queue</span><span class="badge">File backed</span></div>' +
+        '<div class="section"><div class="section-title"><span>Fila de Revisao</span><span class="badge">Baseada em arquivo</span></div>' +
         '<div class="safety-grid">' +
-        safetyCard("Pending approvals", counts.pending_approvals || 0, "warning") +
-        safetyCard("Dry-run purchase attempts", counts.dry_run_purchase_attempts || 0, "good") +
-        safetyCard("Manually approved domains", counts.manually_approved_domains || 0, "good") +
-        safetyCard("Real purchases", counts.real_purchases || 0, (counts.real_purchases || 0) ? "danger" : "neutral") +
+        safetyCard("Aprovacoes pendentes", counts.pending_approvals || 0, "warning") +
+        safetyCard("Tentativas de compra dry-run", counts.dry_run_purchase_attempts || 0, "good") +
+        safetyCard("Dominios aprovados manualmente", counts.manually_approved_domains || 0, "good") +
+        safetyCard("Compras reais", counts.real_purchases || 0, (counts.real_purchases || 0) ? "danger" : "neutral") +
         '</div></div>' +
-        '<div class="section"><div class="section-title"><span>Safety Blocks</span><span class="badge">Decision logs</span></div>' +
+        '<div class="section"><div class="section-title"><span>Bloqueios de Seguranca</span><span class="badge">Logs de decisao</span></div>' +
         '<div class="safety-grid">' +
-        safetyCard("Blocked by trademark", counts.blocked_by_trademark || 0, "danger") +
-        safetyCard("Blocked by low liquidity", counts.blocked_by_low_liquidity || 0, "warning") +
-        safetyCard("Blocked by budget", counts.blocked_by_budget || 0, "danger") +
-        safetyCard("Blocked by cooldown", counts.blocked_by_cooldown || 0, "warning") +
+        safetyCard("Bloqueados por marca", counts.blocked_by_trademark || 0, "danger") +
+        safetyCard("Bloqueados por baixa liquidez", counts.blocked_by_low_liquidity || 0, "warning") +
+        safetyCard("Bloqueados por orcamento", counts.blocked_by_budget || 0, "danger") +
+        safetyCard("Bloqueados por cooldown", counts.blocked_by_cooldown || 0, "warning") +
         '</div></div>' +
-        '<div class="section"><div class="section-title"><span>Capital Flow</span><span class="badge">Separated counts</span></div>' +
+        '<div class="section"><div class="section-title"><span>Fluxo de Capital</span><span class="badge">Contagens separadas</span></div>' +
         '<div class="safety-grid">' +
-        safetyCard("Opportunities Found", flow.opportunities_found || 0, "neutral") +
-        safetyCard("Domains Approved", flow.domains_approved || 0, "good") +
-        safetyCard("Domains Purchased", flow.domains_purchased || 0, (flow.domains_purchased || 0) ? "danger" : "neutral") +
-        safetyCard("Domains Sold", flow.domains_sold || 0, "good") +
+        safetyCard("Oportunidades encontradas", flow.opportunities_found || 0, "neutral") +
+        safetyCard("Dominios aprovados", flow.domains_approved || 0, "good") +
+        safetyCard("Dominios comprados", flow.domains_purchased || 0, (flow.domains_purchased || 0) ? "danger" : "neutral") +
+        safetyCard("Dominios vendidos", flow.domains_sold || 0, "good") +
         '</div></div>' +
-        '<div class="section"><div class="section-title"><span>KPI Cards</span><span class="badge">Risk view</span></div>' +
+        '<div class="section"><div class="section-title"><span>Indicadores</span><span class="badge">Visao de risco</span></div>' +
         '<div class="safety-grid">' + (panel.kpis || []).map(function(item) {
           return safetyCard(item.label, item.value, item.tone || "neutral");
         }).join("") + '</div></div>' +
-        '<div class="section"><div class="section-title"><span>Charts</span><span class="badge">Auto refreshed</span></div>' +
+        '<div class="section"><div class="section-title"><span>Graficos</span><span class="badge">Atualizacao automatica</span></div>' +
         '<div class="safety-chart-grid">' +
-        '<div class="chart-card"><div class="section-title"><span>Rejection Reasons</span></div>' +
-        horizontalBars(charts.rejection_reasons || [], "No rejection reasons") + '</div>' +
-        '<div class="chart-card"><div class="section-title"><span>Pending Approvals Over Time</span></div>' +
+        '<div class="chart-card"><div class="section-title"><span>Motivos de Rejeicao</span></div>' +
+        horizontalBars(charts.rejection_reasons || [], "Nenhum motivo de rejeicao") + '</div>' +
+        '<div class="chart-card"><div class="section-title"><span>Aprovacoes Pendentes ao Longo do Tempo</span></div>' +
         pendingTimeline(charts.pending_over_time || []) + '</div>' +
-        '<div class="chart-card"><div class="section-title"><span>Approval Rate</span></div>' +
+        '<div class="chart-card"><div class="section-title"><span>Taxa de Aprovacao</span></div>' +
         approvalRate(charts.approval_rate || []) + '</div>' +
         '</div></div>';
       document.getElementById("domain-safety").innerHTML = html;
@@ -944,7 +951,7 @@
 
     function pendingTimeline(items) {
       items = items || [];
-      if (!items.length) return '<div class="empty">No pending approval history</div>';
+      if (!items.length) return '<div class="empty">Nenhum historico de aprovacao pendente</div>';
       var max = items.reduce(function(value, item) { return Math.max(value, Number(item.value || 0)); }, 1);
       return '<div class="timeline-bars">' + items.map(function(item) {
         var height = Math.max(3, Math.min(100, (Number(item.value || 0) / max) * 100));
@@ -958,15 +965,15 @@
       var pending = 0;
       var rate = 0;
       (items || []).forEach(function(item) {
-        if (item.label === "Approved") approved = Number(item.value || 0);
-        if (item.label === "Pending") pending = Number(item.value || 0);
-        if (item.label === "Rate") rate = Number(item.value || 0);
+        if (item.label === "Aprovados") approved = Number(item.value || 0);
+        if (item.label === "Pendentes") pending = Number(item.value || 0);
+        if (item.label === "Taxa") rate = Number(item.value || 0);
       });
       return '<div class="safety-grid" style="grid-template-columns:1fr; gap:8px">' +
-        safetyCard("Approved", approved, "good") +
-        safetyCard("Pending", pending, "warning") +
+        safetyCard("Aprovados", approved, "good") +
+        safetyCard("Pendentes", pending, "warning") +
         '<div class="bar-list"><div class="bar-row" style="grid-template-columns:76px minmax(0,1fr) 54px">' +
-        '<span class="row-label">Rate</span><div class="bar-track"><div class="bar-fill good" style="width:' +
+        '<span class="row-label">Taxa</span><div class="bar-track"><div class="bar-fill good" style="width:' +
         Math.max(0, Math.min(100, rate)).toFixed(2) + '%"></div></div><strong>' + rate.toFixed(1) + '%</strong></div></div></div>';
     }
 
@@ -975,7 +982,7 @@
         return '<div class="feed-row"><div class="feed-time">' + escapeHtml(item.time) + '</div>' +
           '<div class="feed-bot tone-' + escapeHtml(item.tone) + '">' + escapeHtml(item.bot) + '</div>' +
           '<div class="truncate">' + escapeHtml(item.message) + '</div></div>';
-      }).join("") || '<div class="empty">No events yet</div>';
+      }).join("") || '<div class="empty">Nenhum evento ainda</div>';
       document.getElementById("activity-feed").innerHTML = html;
     }
 
@@ -1016,8 +1023,8 @@
 
     async function generateDomainValidationReport(button) {
       button.disabled = true;
-      button.textContent = "Generating...";
-      domainValidationReportStatus = "Generating validation report...";
+      button.textContent = "Gerando...";
+      domainValidationReportStatus = "Gerando relatorio de validacao...";
       renderSnapshot(window.currentSnapshot);
       try {
         var response = await fetch("{{ url_for('api_domain_validation_report') }}", {method: "POST", cache: "no-store"});
@@ -1027,13 +1034,13 @@
         }
         var payload = await response.json();
         if (!response.ok || !payload.ok) {
-          domainValidationReportStatus = "Report generation failed.";
+          domainValidationReportStatus = "Falha ao gerar relatorio.";
         } else {
-          domainValidationReportStatus = (payload.partial ? "Partial report saved: " : "7-day report saved: ") +
-            payload.json_path + " and " + payload.html_path;
+          domainValidationReportStatus = (payload.partial ? "Relatorio parcial salvo: " : "Relatorio de 7 dias salvo: ") +
+            payload.json_path + " e " + payload.html_path;
         }
       } catch (error) {
-        domainValidationReportStatus = "Report generation failed.";
+        domainValidationReportStatus = "Falha ao gerar relatorio.";
       } finally {
         renderSnapshot(window.currentSnapshot);
       }

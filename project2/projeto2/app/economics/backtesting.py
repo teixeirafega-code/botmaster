@@ -63,12 +63,12 @@ class StressTestReport:
 class BacktestingEngine:
     DEFAULT_COST_SCENARIOS: tuple[CostScenario, ...] = (
         CostScenario("base"),
-        CostScenario("2x costs", cost_multiplier=2.0, modest=True),
-        CostScenario("3x costs", cost_multiplier=3.0),
-        CostScenario("slippage 10 points", slippage_points=10.0, modest=True),
-        CostScenario("slippage 15 points", slippage_points=15.0),
-        CostScenario("spread 10 points", spread_points=10.0, modest=True),
-        CostScenario("spread 15 points", spread_points=15.0),
+        CostScenario("2x custos", cost_multiplier=2.0, modest=True),
+        CostScenario("3x custos", cost_multiplier=3.0),
+        CostScenario("slippage 10 pontos", slippage_points=10.0, modest=True),
+        CostScenario("slippage 15 pontos", slippage_points=15.0),
+        CostScenario("spread 10 pontos", spread_points=10.0, modest=True),
+        CostScenario("spread 15 pontos", spread_points=15.0),
     )
 
     def run(self, trades: list[BacktestTrade]) -> BacktestReport:
@@ -195,12 +195,12 @@ class BacktestingEngine:
 
     def _format_stress_report(self, report: StressTestReport) -> str:
         rows = [
-            "Stress test report",
-            "==================",
-            f"Profitable scenarios: {', '.join(report.profitable_scenarios) if report.profitable_scenarios else 'none'}",
-            f"Strategy fragility: {'FRAGILE' if report.fragile else 'ROBUST'}",
+            "Relatorio de teste de estresse",
+            "==============================",
+            f"Cenarios lucrativos: {', '.join(report.profitable_scenarios) if report.profitable_scenarios else 'nenhum'}",
+            f"Fragilidade da estrategia: {'FRAGIL' if report.fragile else 'ROBUSTA'}",
             "",
-            "scenario | profitable | net_pnl | sharpe | drawdown | profit_factor | expectancy | failed_periods",
+            "cenario | lucrativo | pnl_liquido | sharpe | drawdown | fator_lucro | expectativa | periodos_falhos",
             "-" * 105,
         ]
         for result in report.scenarios:
@@ -208,13 +208,13 @@ class BacktestingEngine:
                 " | ".join(
                     [
                         result.scenario,
-                        "yes" if result.profitable else "no",
+                        "sim" if result.profitable else "nao",
                         self._format_number(result.net_pnl),
                         self._format_number(result.sharpe),
                         self._format_number(result.drawdown),
                         self._format_number(result.profit_factor),
                         self._format_number(result.expectancy),
-                        f"{result.failed_periods} ({', '.join(result.failed_period_names) if result.failed_period_names else 'none'})",
+                        f"{result.failed_periods} ({', '.join(result.failed_period_names) if result.failed_period_names else 'nenhum'})",
                     ]
                 )
             )
