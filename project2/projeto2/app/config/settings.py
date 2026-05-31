@@ -187,6 +187,7 @@ class Settings(BaseSettings):
     state_file: Path = BASE_DIR / "data" / "domains.json"
     pending_approvals_file: Path = BASE_DIR / "data" / "pending_approvals.json"
     purchase_attempts_file: Path = BASE_DIR / "data" / "purchase_attempts.json"
+    acquisition_decisions_file: Path = BASE_DIR / "data" / "acquisition_decisions.jsonl"
     log_file: Path = BASE_DIR / "logs" / "domain_hunter_bot.log"
     service_name: str = "domain_hunter_bot"
 
@@ -280,5 +281,6 @@ def get_settings() -> Settings:
     settings.state_file.parent.mkdir(parents=True, exist_ok=True)
     settings.pending_approvals_file.parent.mkdir(parents=True, exist_ok=True)
     settings.purchase_attempts_file.parent.mkdir(parents=True, exist_ok=True)
+    settings.acquisition_decisions_file.parent.mkdir(parents=True, exist_ok=True)
     settings.log_file.parent.mkdir(parents=True, exist_ok=True)
     return settings

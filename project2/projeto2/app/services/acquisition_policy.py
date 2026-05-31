@@ -10,8 +10,9 @@ from app.config.settings import Settings
 from app.core.context import get_correlation_id, get_operation_id
 from app.db.postgres import DomainRepository
 from app.economics.models import ValuationResult
-from app.economics.trademark import detect_trademark_risk
+from app.economics.trademark import TrademarkRisk, detect_trademark_risk
 from app.models import DomainCandidate, DomainStatus, ManagedDomain
+from app.services.acquisition_decisions import AcquisitionDecisionStore, CanonicalAcquisitionDecision, FinalDecision
 from app.services.manual_approval import ManualApprovalStore
 from app.services.telegram_notifier import TelegramNotifier
 
@@ -26,9 +27,12 @@ class AcquisitionPolicyDecision:
     reason: str
     price: float
     trademark_risk: bool
+    trademark_reason: str
     liquidity_grade: str
     sale_probability: float
+    expected_holding_months: float
     expected_value: float
+    final_decision: FinalDecision
     manual_approval_required: bool = False
     approved_by: str | None = None
 
@@ -49,6 +53,7 @@ class AcquisitionPolicy:
         self.notifier = notifier
         self.repository = repository
         self.approvals = approvals or ManualApprovalStore(settings.pending_approvals_file)
+        self.decision_store = AcquisitionDecisionStore(settings.acquisition_decisions_file)
         self._counters: Counter[str] = Counter()
 
     async def evaluate(
@@ -69,43 +74,52 @@ class AcquisitionPolicy:
                 reasons[0],
                 price,
                 trademark_risk,
+                self._trademark_reason(trademark, valuation),
                 valuation.liquidity_grade,
                 valuation.sale_probability,
+                valuation.expected_holding_months,
                 valuation.expected_value,
+                "rejected",
             )
-            await self._record_decision(candidate, decision)
+            await self._record_decision(candidate, valuation, portfolio, trademark, decision, reasons)
             return decision
 
         if not self.approvals.is_approved(candidate.name):
             reason = "manual_approval_required" if self.settings.safe_mode else "pending_manual_approval"
-            self.approvals.upsert_pending(candidate, valuation, reason, price)
-            await self.notifier.send_manual_approval_alert(candidate.name, candidate.score, price, valuation)
-            if self.settings.safe_mode:
-                await self.notifier.send_safe_mode_block_alert(candidate.name, candidate.score)
             decision = AcquisitionPolicyDecision(
                 "watchlist",
                 reason,
                 price,
                 trademark_risk,
+                self._trademark_reason(trademark, valuation),
                 valuation.liquidity_grade,
                 valuation.sale_probability,
+                valuation.expected_holding_months,
                 valuation.expected_value,
+                "pending_approval",
                 manual_approval_required=True,
             )
-            await self._record_decision(candidate, decision)
+            await self._record_decision(candidate, valuation, portfolio, trademark, decision, [])
+            await self.notifier.send_manual_approval_alert(candidate.name, candidate.score, price, valuation)
+            if self.settings.safe_mode:
+                await self.notifier.send_safe_mode_block_alert(candidate.name, candidate.score)
             return decision
 
+        final_decision: FinalDecision = "dry_run_purchase" if self.settings.dry_run_purchases else "purchased"
         decision = AcquisitionPolicyDecision(
             "buy",
             "approved_for_purchase",
             price,
             trademark_risk,
+            self._trademark_reason(trademark, valuation),
             valuation.liquidity_grade,
             valuation.sale_probability,
+            valuation.expected_holding_months,
             valuation.expected_value,
+            final_decision,
             approved_by=self.approvals.approved_by(candidate.name),
         )
-        await self._record_decision(candidate, decision)
+        await self._record_decision(candidate, valuation, portfolio, trademark, decision, [])
         return decision
 
     def policy_snapshot(self, candidate: DomainCandidate, decision: AcquisitionPolicyDecision) -> dict[str, object]:
@@ -118,9 +132,11 @@ class AcquisitionPolicy:
             "expected_value": decision.expected_value,
             "min_expected_value": self.settings.risk.min_expected_value,
             "sale_probability": decision.sale_probability,
+            "expected_holding_months": decision.expected_holding_months,
             "liquidity_grade": decision.liquidity_grade,
             "allowed_liquidity_grades": ["A", "B"],
             "trademark_risk": decision.trademark_risk,
+            "trademark_reason": decision.trademark_reason,
             "max_domain_price_usd": self.settings.risk.max_domain_price_usd,
             "max_daily_spend_usd": self.settings.risk.max_daily_spend_usd,
             "max_weekly_spend_usd": self.settings.risk.max_weekly_spend_usd,
@@ -128,8 +144,35 @@ class AcquisitionPolicy:
             "max_portfolio_domains": self.settings.risk.max_portfolio_domains,
             "cooldown_minutes_between_buys": self.settings.risk.cooldown_minutes_between_buys,
             "decision": decision.action,
+            "final_decision": decision.final_decision,
             "decision_reason": decision.reason,
         }
+
+    async def record_runtime_override(
+        self,
+        candidate: DomainCandidate,
+        valuation: ValuationResult,
+        portfolio: list[ManagedDomain],
+        previous_decision: AcquisitionPolicyDecision,
+        final_decision: FinalDecision,
+        final_reason: str,
+    ) -> None:
+        trademark = detect_trademark_risk(candidate.name, self.settings.risk.famous_brands)
+        decision = AcquisitionPolicyDecision(
+            previous_decision.action,
+            final_reason,
+            previous_decision.price,
+            previous_decision.trademark_risk,
+            previous_decision.trademark_reason,
+            previous_decision.liquidity_grade,
+            previous_decision.sale_probability,
+            previous_decision.expected_holding_months,
+            previous_decision.expected_value,
+            final_decision,
+            manual_approval_required=previous_decision.manual_approval_required,
+            approved_by=previous_decision.approved_by,
+        )
+        await self._record_decision(candidate, valuation, portfolio, trademark, decision, [final_reason])
 
     def _blocking_reasons(
         self,
@@ -240,9 +283,54 @@ class AcquisitionPolicy:
         dates = [domain.registered_at for domain in portfolio if domain.registered_at]
         return max(dates) if dates else None
 
-    async def _record_decision(self, candidate: DomainCandidate, decision: AcquisitionPolicyDecision) -> None:
+    def _canonical_decision(
+        self,
+        candidate: DomainCandidate,
+        valuation: ValuationResult,
+        portfolio: list[ManagedDomain],
+        trademark: TrademarkRisk,
+        decision: AcquisitionPolicyDecision,
+        reasons: list[str],
+    ) -> CanonicalAcquisitionDecision:
+        extension = self._extension(candidate, valuation)
+        return CanonicalAcquisitionDecision(
+            domain=candidate.name,
+            score=candidate.score,
+            estimated_sale_price=float(valuation.estimated_sale_price or valuation.expected_sale_price),
+            price=round(decision.price, 2),
+            extension=extension,
+            trademark_risk=decision.trademark_risk,
+            trademark_reason=decision.trademark_reason,
+            liquidity_grade=valuation.liquidity_grade,
+            sale_probability=valuation.sale_probability,
+            expected_holding_months=valuation.expected_holding_months,
+            expected_value=valuation.expected_value,
+            passed_score_filter=candidate.score >= self.settings.risk.min_score_to_buy,
+            passed_trademark_filter=not decision.trademark_risk,
+            passed_liquidity_filter=valuation.expected_value >= self.settings.risk.min_expected_value and valuation.liquidity_grade in {"A", "B"},
+            passed_extension_filter=extension == ".com" or self.settings.risk.allow_non_com,
+            passed_price_filter=decision.price <= self.settings.risk.max_domain_price_usd,
+            passed_budget_filter=not any(self._is_budget_reason(reason) for reason in reasons)
+            and self._portfolio_budget_ok(portfolio, decision.price),
+            final_decision=decision.final_decision,
+            final_reason=decision.reason,
+            timestamp=datetime.now(UTC).isoformat(),
+        )
+
+    async def _record_decision(
+        self,
+        candidate: DomainCandidate,
+        valuation: ValuationResult,
+        portfolio: list[ManagedDomain],
+        trademark: TrademarkRisk,
+        decision: AcquisitionPolicyDecision,
+        reasons: list[str],
+    ) -> None:
+        canonical = self._canonical_decision(candidate, valuation, portfolio, trademark, decision, reasons)
+        self.decision_store.append(canonical)
+        self.decision_store.sync_pending_approvals(self.settings.pending_approvals_file)
         self._counters["decisions_total"] += 1
-        self._counters[f"{decision.action}_total"] += 1
+        self._counters[f"{decision.final_decision}_total"] += 1
         self._counters[f"reason:{decision.reason}"] += 1
         logger.info(
             "acquisition_decision",
@@ -251,12 +339,16 @@ class AcquisitionPolicy:
                 "domain": candidate.name,
                 "score": candidate.score,
                 "trademark_risk": decision.trademark_risk,
+                "trademark_reason": decision.trademark_reason,
                 "liquidity_grade": decision.liquidity_grade,
                 "sale_probability": decision.sale_probability,
+                "expected_holding_months": decision.expected_holding_months,
                 "expected_value": decision.expected_value,
                 "price": decision.price,
                 "decision": decision.action,
+                "final_decision": decision.final_decision,
                 "decision_reason": decision.reason,
+                "canonical_decision": canonical.as_dict(),
             },
         )
         await self.repository.save_risk_event(
@@ -269,3 +361,39 @@ class AcquisitionPolicy:
 
     def counters_snapshot(self) -> dict[str, int]:
         return dict(self._counters)
+
+    def _extension(self, candidate: DomainCandidate, valuation: ValuationResult) -> str:
+        if valuation.extension:
+            return valuation.extension.lower()
+        return "." + candidate.name.rsplit(".", 1)[-1].lower()
+
+    def _trademark_reason(self, trademark: TrademarkRisk, valuation: ValuationResult) -> str:
+        if trademark.reason:
+            return trademark.reason
+        return valuation.trademark_reason if valuation.trademark_risk else ""
+
+    def _is_budget_reason(self, reason: str) -> bool:
+        return reason in {
+            "max_daily_spend_reached",
+            "max_weekly_spend_reached",
+            "max_buys_per_day_reached",
+            "max_portfolio_domains_reached",
+            "cooldown_between_buys_active",
+        }
+
+    def _portfolio_budget_ok(self, portfolio: list[ManagedDomain], price: float) -> bool:
+        active_statuses = {DomainStatus.REGISTERED, DomainStatus.LISTED}
+        active_portfolio_size = len([domain for domain in portfolio if domain.status in active_statuses])
+        if active_portfolio_size >= self.settings.risk.max_portfolio_domains:
+            return False
+        if self._buys_today(portfolio) >= self.settings.risk.max_buys_per_day:
+            return False
+        if self._spend_since(portfolio, timedelta(days=1)) + price > self.settings.risk.max_daily_spend_usd:
+            return False
+        if self._spend_since(portfolio, timedelta(days=7)) + price > self.settings.risk.max_weekly_spend_usd:
+            return False
+        last_buy = self._last_buy_at(portfolio)
+        return not (
+            last_buy
+            and datetime.now(UTC) - last_buy < timedelta(minutes=self.settings.risk.cooldown_minutes_between_buys)
+        )

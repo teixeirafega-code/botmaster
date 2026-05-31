@@ -185,6 +185,14 @@ class DomainManager:
                         )
                     )
                 elif acquisition_decision.should_buy:
+                    await self.acquisition_policy.record_runtime_override(
+                        scored,
+                        valuation,
+                        portfolio,
+                        acquisition_decision,
+                        "rejected",
+                        "risk_manager_rejected",
+                    )
                     await self.event_bus.publish(
                         DomainEvent(
                             EventName.DOMAIN_REJECTED,

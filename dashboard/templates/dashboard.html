@@ -343,6 +343,18 @@
     .domain-row, .trend-row {
       padding: 10px 11px;
     }
+    .domain-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .domain-warning {
+      margin-top: 8px;
+      justify-content: flex-start;
+      white-space: normal;
+      text-align: left;
+    }
     .split {
       display: flex;
       align-items: center;
@@ -803,10 +815,20 @@
     function renderDomain(card) {
       var inventory = card.inventory || {};
       var top = (card.top_domains || []).map(function(item) {
+        var warning = item.warning ? '<div><span class="badge danger domain-warning">' + escapeHtml(item.warning) + '</span></div>' : '';
         return '<div class="domain-row"><div class="split">' +
-          '<div class="truncate"><strong>' + escapeHtml(item.name) + '</strong><div class="subtle">Venda estimada ' + escapeHtml(item.estimated_sale_price_label) + '</div></div>' +
+          '<div class="truncate"><strong>' + escapeHtml(item.name) + '</strong><div class="subtle">Venda estimada ' +
+          escapeHtml(item.estimated_sale_price_label) + ' | valor esperado ' + escapeHtml(item.expected_value_label) + '</div></div>' +
           '<span class="badge ' + escapeHtml(item.tone) + '">' + escapeHtml(item.score_label) + '</span>' +
-        '</div></div>';
+        '</div><div class="domain-meta">' +
+          '<span class="badge">Decisao: ' + escapeHtml(item.final_decision_label || item.final_decision) + '</span>' +
+          '<span class="badge">Motivo: ' + escapeHtml(item.final_reason || "sem motivo") + '</span>' +
+          '<span class="badge">Liquidez ' + escapeHtml(item.liquidity_grade || "N/A") + '</span>' +
+          '<span class="badge">Prob. ' + escapeHtml(item.sale_probability_label || "N/A") + '</span>' +
+          '<span class="badge ' + (item.trademark_risk ? "danger" : "good") + '">Marca: ' + escapeHtml(item.trademark_risk_label || "Nao") + '</span>' +
+          '<span class="badge ' + (item.reached_pending_approval ? "good" : "warning") + '">Pendencia: ' +
+          escapeHtml(item.reached_pending_approval_label || "Nao") + '</span>' +
+        '</div>' + warning + '</div>';
       }).join("") || '<div class="empty">Nenhum dominio pontuado hoje</div>';
       return renderMetrics(card.metrics) +
         '<div class="section"><div class="section-title"><span>Portfolio</span><span class="badge good">' +
@@ -902,7 +924,7 @@
         safetyCard("Dominios aprovados manualmente", counts.manually_approved_domains || 0, "good") +
         safetyCard("Compras reais", counts.real_purchases || 0, (counts.real_purchases || 0) ? "danger" : "neutral") +
         '</div></div>' +
-        '<div class="section"><div class="section-title"><span>Bloqueios de Seguranca</span><span class="badge">Logs de decisao</span></div>' +
+        '<div class="section"><div class="section-title"><span>Bloqueios de Seguranca</span><span class="badge">Decisoes canonicas</span></div>' +
         '<div class="safety-grid">' +
         safetyCard("Bloqueados por marca", counts.blocked_by_trademark || 0, "danger") +
         safetyCard("Bloqueados por baixa liquidez", counts.blocked_by_low_liquidity || 0, "warning") +

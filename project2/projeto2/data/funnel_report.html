@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Relatorio do Funil de Aquisicao</title>
+  <style>
+    body { margin:0; background:#07101b; color:#e5eefb; font-family: Inter, Arial, sans-serif; }
+    main { max-width:1180px; margin:0 auto; padding:28px 18px 44px; }
+    h1 { margin:0 0 8px; font-size:28px; }
+    .muted { color:#93a4ba; }
+    .grid { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:10px; margin:18px 0; }
+    .card { border:1px solid #26364b; border-radius:8px; padding:12px; background:#0d1726; }
+    .card span { display:block; color:#93a4ba; font-size:12px; text-transform:uppercase; }
+    .card strong { display:block; margin-top:7px; font-size:24px; }
+    table { width:100%; border-collapse:collapse; margin-top:14px; background:#0d1726; border-radius:8px; overflow:hidden; }
+    th, td { border-bottom:1px solid #26364b; padding:10px; text-align:left; vertical-align:top; }
+    th { color:#93a4ba; font-size:12px; text-transform:uppercase; }
+    @media (max-width: 780px) { .grid { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Relatorio do Funil de Aquisicao do Domain Hunter</h1>
+    <p class="muted">Gerado em 2026-05-31T00:57:15.387267+00:00. O dashboard nao recalcula politica: ele le a decisao canonica persistida.</p>
+    <section class="grid"><div class='card'><span>Canonical Decisions</span><strong>0</strong></div><div class='card'><span>Domains Reviewed</span><strong>0</strong></div><div class='card'><span>Pending Approvals</span><strong>0</strong></div><div class='card'><span>Manual Approvals</span><strong>0</strong></div><div class='card'><span>Dry Run Purchase Attempts</span><strong>0</strong></div><div class='card'><span>Real Purchases</span><strong>0</strong></div><div class='card'><span>High Score Blocked</span><strong>0</strong></div></section>
+    <h2>Decisoes Finais</h2>
+    <table><thead><tr><th>Decisao</th><th>Quantidade</th></tr></thead><tbody><tr><td colspan="2">Nenhuma decisao final.</td></tr></tbody></table>
+    <h2>Falhas por Filtro</h2>
+    <table><thead><tr><th>Filtro</th><th>Quantidade</th></tr></thead><tbody><tr><td colspan="2">Nenhuma falha de filtro.</td></tr></tbody></table>
+    <h2>Score Alto Bloqueado</h2>
+    <table><thead><tr><th>Dominio</th><th>Score</th><th>Motivo</th></tr></thead><tbody><tr><td colspan="3">Nenhum dominio de score alto bloqueado.</td></tr></tbody></table>
+  </main>
+</body>
+</html>

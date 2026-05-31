@@ -47,6 +47,13 @@ APP_STARTED_AT = datetime.now(timezone.utc)
 logger = logging.getLogger(__name__)
 DASHBOARD_TELEGRAM_LAST_SENT: dict[str, float] = {}
 TELEGRAM_EVENT_COOLDOWN_SECONDS = 900
+AUDIT_DOMAINS = (
+    "trainedrunner.com",
+    "shbaihe.net",
+    "ncshyundai.com",
+    "jainmetals.net",
+    "offkai-event.com",
+)
 
 
 BOT_CONFIG = {
@@ -243,76 +250,41 @@ def _yield_card(process_lines: list[str], now: datetime) -> dict[str, Any]:
 
 def _domain_card(process_lines: list[str], now: datetime) -> dict[str, Any]:
     root = _bot_root("domain")
-    log_path = root / "logs/domain_hunter_bot.log"
-    logs = _json_log_tail(log_path, 5000)
-    domains_state = _read_json(root / "data/domains.json", default=[])
+    decision_path = root / "data/acquisition_decisions.jsonl"
+    pending_path = root / "data/pending_approvals.json"
+    attempts_path = root / "data/purchase_attempts.json"
+    decisions = _acquisition_decision_entries(_read_jsonl(decision_path))
+    approvals = _approval_entries(_read_json(pending_path, default={}))
+    attempts = _purchase_attempt_entries(_read_json(attempts_path, default=[]))
+    latest_decisions = _latest_decisions_by_domain(decisions)
+    min_score = _domain_risk_number(root, "min_score_to_buy", "MIN_SCORE_TO_BUY", 88.0)
     today = now.astimezone().date()
 
-    scanned_today = 0
-    opportunities_today = 0
+    todays_decisions = [
+        item for item in decisions if (_parse_dt(item.get("timestamp")) or now).astimezone().date() == today
+    ]
+    scanned_today = len(todays_decisions) or len(latest_decisions)
+    opportunities_today = len([item for item in latest_decisions.values() if (_safe_float(item.get("score")) or 0) >= min_score])
     last_registered = None
     last_registered_time = None
-    top_candidates: dict[str, dict[str, Any]] = {}
-    inventory_counts = {"registered": 0, "listed": 0, "sold": 0}
+    inventory_counts = {
+        "registered": len([item for item in latest_decisions.values() if item.get("final_decision") == "purchased"]),
+        "listed": 0,
+        "sold": 0,
+    }
+    for item in latest_decisions.values():
+        if item.get("final_decision") != "purchased":
+            continue
+        timestamp = _parse_dt(item.get("timestamp"))
+        if last_registered_time is None or (timestamp and timestamp > last_registered_time):
+            last_registered = str(item.get("domain") or "")
+            last_registered_time = timestamp
 
-    for row in logs:
-        event = str(row.get("event_name", "")).upper()
-        timestamp = _parse_dt(row.get("timestamp"))
-        domain = row.get("domain")
-        score = _safe_float(row.get("score"))
-        if timestamp and timestamp.astimezone().date() == today and event == "DOMAIN_SCORED":
-            scanned_today += 1
-            if score is not None and score >= 70:
-                opportunities_today += 1
-                domain_name = str(domain or "").strip()
-                if domain_name:
-                    previous = top_candidates.get(domain_name)
-                    if not previous or score > previous["score"]:
-                        top_candidates[domain_name] = {
-                            "name": domain_name,
-                            "score": score,
-                            "score_label": _format_score(score),
-                            "estimated_sale_price": _estimate_domain_sale_price(score),
-                            "estimated_sale_price_label": _format_money(_estimate_domain_sale_price(score)),
-                            "tone": _score_tone(score),
-                        }
-        if domain and ("REGISTER" in event or "PURCHASE" in event):
-            if last_registered_time is None or (timestamp and timestamp > last_registered_time):
-                last_registered = str(domain)
-                last_registered_time = timestamp
-        if "REGISTER" in event or "PURCHASE" in event:
-            inventory_counts["registered"] += 1
-        if "LIST" in event:
-            inventory_counts["listed"] += 1
-        if "SOLD" in event or "SALE" in event:
-            inventory_counts["sold"] += 1
+    top_domains = _top_domain_rows(decisions, approvals, min_score)[:5]
+    portfolio_value = sum(_safe_float(item.get("estimated_sale_price")) or 0.0 for item in latest_decisions.values())
+    dry_run_count = len([item for item in attempts if item["blocked_by_dry_run"]])
 
-    if scanned_today == 0 and isinstance(domains_state, list):
-        scanned_today = len(domains_state)
-        for item in domains_state:
-            if not isinstance(item, dict):
-                continue
-            score = _safe_float(item.get("score"))
-            name = str(item.get("domain") or item.get("name") or "").strip()
-            status = str(item.get("status") or "").lower()
-            if status in inventory_counts:
-                inventory_counts[status] += 1
-            if score is not None and score >= 70:
-                opportunities_today += 1
-                if name:
-                    top_candidates[name] = {
-                        "name": name,
-                        "score": score,
-                        "score_label": _format_score(score),
-                        "estimated_sale_price": _estimate_domain_sale_price(score),
-                        "estimated_sale_price_label": _format_money(_estimate_domain_sale_price(score)),
-                        "tone": _score_tone(score),
-                    }
-
-    top_domains = sorted(top_candidates.values(), key=lambda item: item["score"], reverse=True)[:5]
-    portfolio_value = sum(item["estimated_sale_price"] for item in top_candidates.values())
-
-    last_update = _latest_timestamp([log_path, root / "data/domains.json"], [])
+    last_update = _latest_timestamp([decision_path, pending_path, attempts_path], [])
     return {
         "id": "domain",
         "name": "Domain Hunter",
@@ -339,6 +311,7 @@ def _domain_card(process_lines: list[str], now: datetime) -> dict[str, Any]:
             {"label": "Oportunidades encontradas", "value": _format_int(opportunities_today), "tone": "good" if opportunities_today else "warning"},
             {"label": "Ultimo dominio registrado", "value": last_registered or "Nenhum registro nos logs"},
             {"label": "Valor do portfolio", "value": _format_money(portfolio_value), "tone": "good" if portfolio_value else "warning"},
+            {"label": "Tentativas dry-run", "value": _format_int(dry_run_count), "tone": "neutral"},
         ],
         "details": [],
     }
@@ -348,24 +321,25 @@ def _domain_safety_panel(now: datetime, shared_statuses: dict[str, dict[str, Any
     root = _bot_root("domain")
     pending_path = root / "data/pending_approvals.json"
     attempts_path = root / "data/purchase_attempts.json"
-    log_path = root / "logs/domain_hunter_bot.log"
-    domains_path = root / "data/domains.json"
+    decisions_path = root / "data/acquisition_decisions.jsonl"
 
     approvals = _approval_entries(_read_json(pending_path, default={}))
     attempts = _purchase_attempt_entries(_read_json(attempts_path, default=[]))
-    logs = _json_log_tail(log_path, 6000)
-    domains_state = _read_json(domains_path, default=[])
+    decisions = _acquisition_decision_entries(_read_jsonl(decisions_path))
+    latest_decisions = _latest_decisions_by_domain(decisions)
     domain_metrics = shared_statuses.get("domain", {}).get("metrics", {})
     metrics = domain_metrics if isinstance(domain_metrics, dict) else {}
 
-    decisions = _domain_decision_rows(logs)
     reason_counts = _rejection_reason_counts(decisions, metrics)
     blocked_counts = _blocked_counts(reason_counts)
     pending = [item for item in approvals if not item["approved"]]
     approved = [item for item in approvals if item["approved"]]
     dry_run_attempts = [item for item in attempts if item["blocked_by_dry_run"]]
     real_attempt_domains = {item["domain"] for item in attempts if item["domain"] and not item["blocked_by_dry_run"]}
-    real_purchase_domains, sold_domains = _real_domain_sets(domains_state, logs)
+    real_purchase_domains = {
+        item["domain"] for item in latest_decisions.values() if item.get("domain") and item.get("final_decision") == "purchased"
+    }
+    sold_domains: set[str] = set()
     real_purchase_domains.update(real_attempt_domains)
 
     reviewed_domains = {
@@ -375,11 +349,7 @@ def _domain_safety_panel(now: datetime, shared_statuses: dict[str, dict[str, Any
         *real_purchase_domains,
         *sold_domains,
     }
-    opportunities_found = max(
-        len({item["domain"] for item in decisions if item["domain"]}),
-        int(_safe_float(metrics.get("opportunities_found")) or 0),
-        len(reviewed_domains),
-    )
+    opportunities_found = len({item["domain"] for item in decisions if item["domain"]})
     approved_domains = {item["domain"] for item in approved if item["domain"]}
     risky_approved = approved_domains.intersection(_blocked_domain_set(decisions, {"trademark", "low_liquidity"}))
     approval_quality = _approval_quality_score(len(approved_domains), len(risky_approved))
@@ -387,6 +357,8 @@ def _domain_safety_panel(now: datetime, shared_statuses: dict[str, dict[str, Any
     capital_protected = _capital_protected(decisions, dry_run_attempts)
     safe_mode = _domain_safety_bool(root, metrics, "safe_mode", "SAFE_MODE", "safe_mode", True)
     dry_run_purchases = _domain_safety_bool(root, metrics, "dry_run_purchases", "DRY_RUN_PURCHASES", "dry_run_purchases", True)
+    _write_candidate_audit_reports(root, decisions, approvals, attempts, now)
+    _write_funnel_reports(root, decisions, approvals, attempts, now)
 
     return {
         "title": "Seguranca do Domain Hunter",
@@ -457,11 +429,12 @@ def _generate_domain_validation_report(now: datetime) -> dict[str, Any]:
     attempts_path = root / "data/purchase_attempts.json"
     log_path = root / "logs/domain_hunter_bot.log"
     domains_path = root / "data/domains.json"
+    decisions_path = root / "data/acquisition_decisions.jsonl"
 
     approvals = _approval_entries(_read_json(pending_path, default={}))
     attempts = _purchase_attempt_entries(_read_json(attempts_path, default=[]))
     logs = _json_log_tail(log_path, 8000)
-    decisions = _domain_decision_rows(logs)
+    decisions = _acquisition_decision_entries(_read_jsonl(decisions_path))
     domains_state = _read_json(domains_path, default=[])
     cutoff = now - timedelta(days=7)
 
@@ -818,6 +791,376 @@ def _purchase_attempt_entries(raw: Any) -> list[dict[str, Any]]:
     return entries
 
 
+def _acquisition_decision_entries(raw: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw, list):
+        return []
+    entries: list[dict[str, Any]] = []
+    for value in raw:
+        if not isinstance(value, dict):
+            continue
+        domain = str(value.get("domain") or "").strip().lower()
+        if not domain:
+            continue
+        final_decision = _normalized_final_decision(value.get("final_decision") or value.get("decision"))
+        final_reason = str(value.get("final_reason") or value.get("decision_reason") or value.get("reason") or "").strip()
+        if not final_reason:
+            final_reason = "decisao_canonica_incompleta"
+        extension = str(value.get("extension") or ("." + domain.rsplit(".", 1)[-1])).strip().lower()
+        if extension and not extension.startswith("."):
+            extension = f".{extension}"
+        entries.append(
+            {
+                "domain": domain,
+                "score": _safe_float(value.get("score")) or 0.0,
+                "estimated_sale_price": _safe_float(value.get("estimated_sale_price") or value.get("expected_sale_price")) or 0.0,
+                "price": _safe_float(value.get("price")) or 0.0,
+                "extension": extension,
+                "trademark_risk": value.get("trademark_risk") is True,
+                "trademark_reason": str(value.get("trademark_reason") or ""),
+                "liquidity_grade": str(value.get("liquidity_grade") or "").strip().upper() or "D",
+                "sale_probability": _safe_float(value.get("sale_probability")) or 0.0,
+                "expected_holding_months": _safe_float(value.get("expected_holding_months")) or 0.0,
+                "expected_value": _safe_float(value.get("expected_value")) or 0.0,
+                "passed_score_filter": value.get("passed_score_filter") is True,
+                "passed_trademark_filter": value.get("passed_trademark_filter") is True,
+                "passed_liquidity_filter": value.get("passed_liquidity_filter") is True,
+                "passed_extension_filter": value.get("passed_extension_filter") is True,
+                "passed_price_filter": value.get("passed_price_filter") is True,
+                "passed_budget_filter": value.get("passed_budget_filter") is True,
+                "final_decision": final_decision,
+                "final_reason": final_reason,
+                "timestamp": value.get("timestamp"),
+            }
+        )
+    return entries
+
+
+def _normalized_final_decision(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    aliases = {
+        "reject": "rejected",
+        "rejeitado": "rejected",
+        "buy": "purchased",
+        "comprado": "purchased",
+        "watch": "watchlist",
+        "lista_observacao": "watchlist",
+    }
+    text = aliases.get(text, text)
+    if text in {"rejected", "watchlist", "pending_approval", "dry_run_purchase", "purchased"}:
+        return text
+    return "rejected"
+
+
+def _latest_decisions_by_domain(decisions: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    latest: dict[str, dict[str, Any]] = {}
+    for item in decisions:
+        domain = str(item.get("domain") or "").strip().lower()
+        if not domain:
+            continue
+        previous = latest.get(domain)
+        if previous is None or _decision_is_newer(item, previous):
+            latest[domain] = item
+    return latest
+
+
+def _decision_is_newer(current: dict[str, Any], previous: dict[str, Any]) -> bool:
+    current_ts = _parse_dt(current.get("timestamp"))
+    previous_ts = _parse_dt(previous.get("timestamp"))
+    if current_ts and previous_ts:
+        return current_ts >= previous_ts
+    if current_ts and not previous_ts:
+        return True
+    if not current_ts and previous_ts:
+        return False
+    return True
+
+
+def _top_domain_rows(decisions: list[dict[str, Any]], approvals: list[dict[str, Any]], min_score: float) -> list[dict[str, Any]]:
+    approvals_by_domain = {item["domain"] for item in approvals if item.get("domain")}
+    pending_history = {
+        item["domain"]
+        for item in decisions
+        if item.get("domain") and item.get("final_decision") == "pending_approval"
+    }
+    rows: list[dict[str, Any]] = []
+    for item in _latest_decisions_by_domain(decisions).values():
+        domain = str(item.get("domain") or "").lower()
+        score = _safe_float(item.get("score")) or 0.0
+        final_decision = str(item.get("final_decision") or "rejected")
+        final_reason = str(item.get("final_reason") or "decisao_canonica_incompleta")
+        reached_pending = domain in approvals_by_domain or domain in pending_history or final_decision == "pending_approval"
+        is_terminal_ok = final_decision in {"pending_approval", "dry_run_purchase", "purchased"}
+        warning = ""
+        if score >= min_score and not reached_pending and not is_terminal_ok:
+            warning = f"Dominio de score alto bloqueado: {final_reason}"
+        rows.append(
+            {
+                "name": domain,
+                "score": score,
+                "score_label": _format_score(score),
+                "estimated_sale_price": _safe_float(item.get("estimated_sale_price")) or 0.0,
+                "estimated_sale_price_label": _format_money(item.get("estimated_sale_price")),
+                "price": _safe_float(item.get("price")) or 0.0,
+                "price_label": _format_money(item.get("price")),
+                "tone": _score_tone(score),
+                "final_decision": final_decision,
+                "final_decision_label": _title(final_decision),
+                "final_reason": final_reason,
+                "liquidity_grade": str(item.get("liquidity_grade") or "D"),
+                "sale_probability": _safe_float(item.get("sale_probability")) or 0.0,
+                "sale_probability_label": _format_percent(_safe_float(item.get("sale_probability"))),
+                "expected_value": _safe_float(item.get("expected_value")) or 0.0,
+                "expected_value_label": _format_money(item.get("expected_value")),
+                "trademark_risk": item.get("trademark_risk") is True,
+                "trademark_risk_label": "Sim" if item.get("trademark_risk") is True else "Nao",
+                "reached_pending_approval": reached_pending,
+                "reached_pending_approval_label": "Sim" if reached_pending else "Nao",
+                "warning": warning,
+            }
+        )
+    return sorted(rows, key=lambda row: (row["score"], row["expected_value"]), reverse=True)
+
+
+def _write_candidate_audit_reports(
+    root: Path,
+    decisions: list[dict[str, Any]],
+    approvals: list[dict[str, Any]],
+    attempts: list[dict[str, Any]],
+    now: datetime,
+) -> None:
+    output_dir = root / "data"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    json_path = output_dir / "candidate_audit_report.json"
+    html_path = output_dir / "candidate_audit_report.html"
+    min_score = _domain_risk_number(root, "min_score_to_buy", "MIN_SCORE_TO_BUY", 88.0)
+    top_rows = {item["name"]: item for item in _top_domain_rows(decisions, approvals, min_score)}
+    latest = _latest_decisions_by_domain(decisions)
+    rows = []
+    for domain in AUDIT_DOMAINS:
+        latest_item = latest.get(domain)
+        row = dict(top_rows.get(domain) or {"name": domain})
+        row["domain"] = domain
+        row["found"] = latest_item is not None
+        if latest_item is None:
+            row.update(
+                {
+                    "score": 0.0,
+                    "score_label": "0",
+                    "estimated_sale_price": 0.0,
+                    "estimated_sale_price_label": _format_money(0),
+                    "final_decision": "sem_decisao",
+                    "final_decision_label": "Sem Decisao",
+                    "final_reason": "nenhuma_decisao_canonica_encontrada",
+                    "liquidity_grade": "desconhecida",
+                    "sale_probability": 0.0,
+                    "sale_probability_label": _format_percent(0),
+                    "expected_value": 0.0,
+                    "expected_value_label": _format_money(0),
+                    "trademark_risk": False,
+                    "trademark_risk_label": "Nao",
+                    "reached_pending_approval": False,
+                    "reached_pending_approval_label": "Nao",
+                    "warning": "Dominio auditado ainda nao tem decisao canonica.",
+                }
+            )
+        rows.append(row)
+
+    report = {
+        "report_name": "Auditoria de Candidatos do Domain Hunter",
+        "generated_at": now.isoformat(),
+        "source_of_truth": {
+            "acquisition_decisions": str(root / "data/acquisition_decisions.jsonl"),
+            "pending_approvals": str(root / "data/pending_approvals.json"),
+            "purchase_attempts": str(root / "data/purchase_attempts.json"),
+        },
+        "safety": {
+            "real_purchase_api_called": False,
+            "dry_run_attempts_counted_as_real_purchases": False,
+        },
+        "attempts_considered": len(attempts),
+        "candidates": rows,
+        "artifacts": {"json": str(json_path), "html": str(html_path)},
+    }
+    json_path.write_text(json.dumps(report, indent=2, ensure_ascii=True, sort_keys=True), encoding="utf-8")
+    html_path.write_text(_candidate_audit_report_html(report), encoding="utf-8")
+
+
+def _write_funnel_reports(
+    root: Path,
+    decisions: list[dict[str, Any]],
+    approvals: list[dict[str, Any]],
+    attempts: list[dict[str, Any]],
+    now: datetime,
+) -> None:
+    output_dir = root / "data"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    json_path = output_dir / "funnel_report.json"
+    html_path = output_dir / "funnel_report.html"
+    latest = _latest_decisions_by_domain(decisions)
+    min_score = _domain_risk_number(root, "min_score_to_buy", "MIN_SCORE_TO_BUY", 88.0)
+    top_rows = _top_domain_rows(decisions, approvals, min_score)
+    final_counts = Counter(str(item.get("final_decision") or "rejected") for item in latest.values())
+    filter_failures = Counter()
+    for item in latest.values():
+        for key in (
+            "passed_score_filter",
+            "passed_trademark_filter",
+            "passed_liquidity_filter",
+            "passed_extension_filter",
+            "passed_price_filter",
+            "passed_budget_filter",
+        ):
+            if item.get(key) is not True:
+                filter_failures[key.removeprefix("passed_")] += 1
+    dry_run_attempts = [item for item in attempts if item["blocked_by_dry_run"]]
+    real_attempt_domains = {item["domain"] for item in attempts if item["domain"] and not item["blocked_by_dry_run"]}
+    real_purchase_domains = {
+        item["domain"] for item in latest.values() if item.get("domain") and item.get("final_decision") == "purchased"
+    }
+    real_purchase_domains.update(real_attempt_domains)
+    high_score_blocked = [row for row in top_rows if row.get("warning")]
+    report = {
+        "report_name": "Relatorio do Funil de Aquisicao do Domain Hunter",
+        "generated_at": now.isoformat(),
+        "source_of_truth": {
+            "acquisition_decisions": str(root / "data/acquisition_decisions.jsonl"),
+            "pending_approvals": str(root / "data/pending_approvals.json"),
+            "purchase_attempts": str(root / "data/purchase_attempts.json"),
+        },
+        "summary": {
+            "canonical_decisions": len(decisions),
+            "domains_reviewed": len(latest),
+            "pending_approvals": len([item for item in approvals if not item["approved"]]),
+            "manual_approvals": len([item for item in approvals if item["approved"]]),
+            "dry_run_purchase_attempts": len(dry_run_attempts),
+            "real_purchases": len(real_purchase_domains),
+            "high_score_blocked": len(high_score_blocked),
+        },
+        "final_decisions": dict(final_counts),
+        "filter_failures": dict(filter_failures),
+        "high_score_blocked_domains": high_score_blocked,
+        "safety": {
+            "safe_mode_default": True,
+            "auto_buy_enabled_default": False,
+            "dry_run_purchases_default": True,
+            "real_purchase_api_called": False,
+        },
+        "artifacts": {"json": str(json_path), "html": str(html_path)},
+    }
+    json_path.write_text(json.dumps(report, indent=2, ensure_ascii=True, sort_keys=True), encoding="utf-8")
+    html_path.write_text(_funnel_report_html(report), encoding="utf-8")
+
+
+def _candidate_audit_report_html(report: dict[str, Any]) -> str:
+    rows = "\n".join(
+        "<tr>"
+        f"<td>{html.escape(str(item.get('domain', '')))}</td>"
+        f"<td>{html.escape(str(item.get('score_label', '')))}</td>"
+        f"<td>{html.escape(str(item.get('final_decision', '')))}</td>"
+        f"<td>{html.escape(str(item.get('final_reason', '')))}</td>"
+        f"<td>{html.escape(str(item.get('liquidity_grade', '')))}</td>"
+        f"<td>{html.escape(str(item.get('sale_probability_label', '')))}</td>"
+        f"<td>{html.escape(str(item.get('expected_value_label', '')))}</td>"
+        f"<td>{html.escape(str(item.get('trademark_risk_label', '')))}</td>"
+        f"<td>{html.escape(str(item.get('reached_pending_approval_label', '')))}</td>"
+        f"<td>{html.escape(str(item.get('warning', '')))}</td>"
+        "</tr>"
+        for item in report.get("candidates", [])
+    ) or '<tr><td colspan="10">Nenhum candidato auditado.</td></tr>'
+    return f"""<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Auditoria de Candidatos do Domain Hunter</title>
+  <style>
+    body {{ margin:0; background:#07101b; color:#e5eefb; font-family: Inter, Arial, sans-serif; }}
+    main {{ max-width:1180px; margin:0 auto; padding:28px 18px 44px; }}
+    h1 {{ margin:0 0 8px; font-size:28px; }}
+    .muted {{ color:#93a4ba; }}
+    table {{ width:100%; border-collapse:collapse; margin-top:18px; background:#0d1726; border-radius:8px; overflow:hidden; }}
+    th, td {{ border-bottom:1px solid #26364b; padding:10px; text-align:left; vertical-align:top; }}
+    th {{ color:#93a4ba; font-size:12px; text-transform:uppercase; }}
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Auditoria de Candidatos do Domain Hunter</h1>
+    <p class="muted">Gerado em {html.escape(str(report.get('generated_at')))}. Fonte unica: acquisition_decisions.jsonl, pending_approvals.json e purchase_attempts.json.</p>
+    <table>
+      <thead>
+        <tr>
+          <th>Dominio</th><th>Score</th><th>Decisao Final</th><th>Motivo Final</th><th>Liquidez</th>
+          <th>Prob. Venda</th><th>Valor Esperado</th><th>Risco Marca</th><th>Chegou em Pendencia</th><th>Aviso</th>
+        </tr>
+      </thead>
+      <tbody>{rows}</tbody>
+    </table>
+  </main>
+</body>
+</html>
+"""
+
+
+def _funnel_report_html(report: dict[str, Any]) -> str:
+    summary = report.get("summary", {})
+    decisions = report.get("final_decisions", {})
+    failures = report.get("filter_failures", {})
+    blocked = report.get("high_score_blocked_domains", [])
+    summary_cards = "".join(
+        f"<div class='card'><span>{html.escape(_title(key))}</span><strong>{html.escape(str(value))}</strong></div>"
+        for key, value in summary.items()
+    )
+    decision_rows = "".join(
+        f"<tr><td>{html.escape(str(key))}</td><td>{html.escape(str(value))}</td></tr>"
+        for key, value in decisions.items()
+    ) or '<tr><td colspan="2">Nenhuma decisao final.</td></tr>'
+    failure_rows = "".join(
+        f"<tr><td>{html.escape(str(key))}</td><td>{html.escape(str(value))}</td></tr>"
+        for key, value in failures.items()
+    ) or '<tr><td colspan="2">Nenhuma falha de filtro.</td></tr>'
+    blocked_rows = "".join(
+        f"<tr><td>{html.escape(str(item.get('name', '')))}</td><td>{html.escape(str(item.get('score_label', '')))}</td><td>{html.escape(str(item.get('warning', '')))}</td></tr>"
+        for item in blocked
+    ) or '<tr><td colspan="3">Nenhum dominio de score alto bloqueado.</td></tr>'
+    return f"""<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Relatorio do Funil de Aquisicao</title>
+  <style>
+    body {{ margin:0; background:#07101b; color:#e5eefb; font-family: Inter, Arial, sans-serif; }}
+    main {{ max-width:1180px; margin:0 auto; padding:28px 18px 44px; }}
+    h1 {{ margin:0 0 8px; font-size:28px; }}
+    .muted {{ color:#93a4ba; }}
+    .grid {{ display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:10px; margin:18px 0; }}
+    .card {{ border:1px solid #26364b; border-radius:8px; padding:12px; background:#0d1726; }}
+    .card span {{ display:block; color:#93a4ba; font-size:12px; text-transform:uppercase; }}
+    .card strong {{ display:block; margin-top:7px; font-size:24px; }}
+    table {{ width:100%; border-collapse:collapse; margin-top:14px; background:#0d1726; border-radius:8px; overflow:hidden; }}
+    th, td {{ border-bottom:1px solid #26364b; padding:10px; text-align:left; vertical-align:top; }}
+    th {{ color:#93a4ba; font-size:12px; text-transform:uppercase; }}
+    @media (max-width: 780px) {{ .grid {{ grid-template-columns:1fr; }} }}
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Relatorio do Funil de Aquisicao do Domain Hunter</h1>
+    <p class="muted">Gerado em {html.escape(str(report.get('generated_at')))}. O dashboard nao recalcula politica: ele le a decisao canonica persistida.</p>
+    <section class="grid">{summary_cards}</section>
+    <h2>Decisoes Finais</h2>
+    <table><thead><tr><th>Decisao</th><th>Quantidade</th></tr></thead><tbody>{decision_rows}</tbody></table>
+    <h2>Falhas por Filtro</h2>
+    <table><thead><tr><th>Filtro</th><th>Quantidade</th></tr></thead><tbody>{failure_rows}</tbody></table>
+    <h2>Score Alto Bloqueado</h2>
+    <table><thead><tr><th>Dominio</th><th>Score</th><th>Motivo</th></tr></thead><tbody>{blocked_rows}</tbody></table>
+  </main>
+</body>
+</html>
+"""
+
+
 def _domain_decision_rows(logs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     decisions: list[dict[str, Any]] = []
     for row in logs:
@@ -843,8 +1186,10 @@ def _domain_decision_rows(logs: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def _rejection_reason_counts(decisions: list[dict[str, Any]], metrics: dict[str, Any]) -> Counter[str]:
     counts: Counter[str] = Counter()
     for item in decisions:
-        if item["decision"] == "reject" and item["reason"]:
-            counts[item["reason"]] += 1
+        decision = str(item.get("final_decision") or item.get("decision") or "").lower()
+        reason = str(item.get("final_reason") or item.get("reason") or item.get("decision_reason") or "").strip().lower()
+        if decision in {"rejected", "reject"} and reason:
+            counts[reason] += 1
     policy_counters = metrics.get("policy_counters")
     if isinstance(policy_counters, dict):
         for key, value in policy_counters.items():
@@ -870,8 +1215,11 @@ def _blocked_counts(reason_counts: Counter[str]) -> Counter[str]:
 def _blocked_domain_set(decisions: list[dict[str, Any]], categories: set[str]) -> set[str]:
     domains = set()
     for item in decisions:
-        if item["decision"] == "reject" and _safety_rejection_category(item["reason"]) in categories and item["domain"]:
-            domains.add(item["domain"])
+        decision = str(item.get("final_decision") or item.get("decision") or "").lower()
+        reason = str(item.get("final_reason") or item.get("reason") or "").strip().lower()
+        domain = str(item.get("domain") or "").strip().lower()
+        if decision in {"rejected", "reject"} and _safety_rejection_category(reason) in categories and domain:
+            domains.add(domain)
     return domains
 
 
@@ -917,7 +1265,9 @@ def _real_domain_sets(domains_state: Any, logs: list[dict[str, Any]]) -> tuple[s
 def _capital_protected(decisions: list[dict[str, Any]], dry_run_attempts: list[dict[str, Any]]) -> float:
     total = sum(item["price"] for item in dry_run_attempts)
     for item in decisions:
-        if item["decision"] == "reject" and _safety_rejection_category(item["reason"]) != "other":
+        decision = str(item.get("final_decision") or item.get("decision") or "").lower()
+        reason = str(item.get("final_reason") or item.get("reason") or "").strip().lower()
+        if decision in {"rejected", "reject"} and _safety_rejection_category(reason) != "other":
             total += _safe_float(item.get("price")) or 0.0
     return total
 
@@ -1455,6 +1805,23 @@ def _read_json(path: Path, default: Any | None = None) -> Any:
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return default
+
+
+def _read_jsonl(path: Path) -> list[dict[str, Any]]:
+    if not path.exists() or not path.is_file():
+        return []
+    rows: list[dict[str, Any]] = []
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    for line in lines:
+        if not line.strip():
+            continue
+        item = _json_loads(line, None)
+        if isinstance(item, dict):
+            rows.append(item)
+    return rows
 
 
 def _json_loads(value: str, default: Any) -> Any:

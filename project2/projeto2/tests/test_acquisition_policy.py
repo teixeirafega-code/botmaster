@@ -30,6 +30,7 @@ def make_settings(tmp_path, **risk_overrides):
         safe_mode=True,
         pending_approvals_file=tmp_path / "pending_approvals.json",
         purchase_attempts_file=tmp_path / "purchase_attempts.json",
+        acquisition_decisions_file=tmp_path / "acquisition_decisions.jsonl",
         telegram_bot_token=None,
         telegram_chat_id=None,
         risk=risk,
@@ -104,32 +105,55 @@ async def evaluate(tmp_path, candidate, valuation, portfolio=None, **risk_overri
     return decision, repository, settings
 
 
+def read_decisions(settings):
+    if not settings.acquisition_decisions_file.exists():
+        return []
+    return [
+        json.loads(line)
+        for line in settings.acquisition_decisions_file.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+
 @pytest.mark.asyncio
 async def test_ncshyundai_is_rejected_for_trademark_risk(tmp_path):
     candidate = make_candidate("ncshyundai.com")
     valuation = make_valuation("ncshyundai.com")
 
-    decision, repository, _settings = await evaluate(tmp_path, candidate, valuation)
+    decision, repository, settings = await evaluate(tmp_path, candidate, valuation)
 
     assert decision.action == "reject"
+    assert decision.final_decision == "rejected"
     assert decision.trademark_risk is True
     assert decision.reason == "trademark_risk"
+    canonical = read_decisions(settings)[-1]
+    assert canonical["domain"] == "ncshyundai.com"
+    assert canonical["final_decision"] == "rejected"
+    assert canonical["final_reason"] == "trademark_risk"
+    assert canonical["passed_trademark_filter"] is False
+    assert canonical["trademark_reason"]
     assert repository.risk_events[0][1] == "reject:trademark_risk"
 
 
 @pytest.mark.asyncio
 async def test_safe_mode_sends_trainedrunner_to_pending_approval(tmp_path):
-    candidate = make_candidate("trainedrunner.com")
-    valuation = make_valuation("trainedrunner.com")
+    candidate = make_candidate("trainedrunner.com", score=91)
+    valuation = make_valuation("trainedrunner.com", score=91)
 
     decision, repository, settings = await evaluate(tmp_path, candidate, valuation)
 
     assert decision.action == "watchlist"
+    assert decision.final_decision == "pending_approval"
     assert decision.should_buy is False
     assert decision.manual_approval_required is True
     approvals = json.loads(settings.pending_approvals_file.read_text(encoding="utf-8"))
     assert approvals["trainedrunner.com"]["approved"] is False
     assert approvals["trainedrunner.com"]["reason"] == "manual_approval_required"
+    canonical = read_decisions(settings)[-1]
+    assert canonical["domain"] == "trainedrunner.com"
+    assert canonical["score"] == 91
+    assert canonical["final_decision"] == "pending_approval"
+    assert canonical["final_reason"] == "manual_approval_required"
     assert any("Aprovacao pendente criada" in alert[1] for alert in repository.alerts)
     assert await repository.list_managed_domains() == []
 
@@ -146,15 +170,25 @@ async def test_low_liquidity_net_domain_does_not_auto_buy(tmp_path):
         liquidity_grade="D",
     )
 
-    decision, _repository, _settings = await evaluate(tmp_path, candidate, valuation)
+    decision, _repository, settings = await evaluate(tmp_path, candidate, valuation)
 
     assert decision.action == "reject"
+    assert decision.final_decision in {"rejected", "watchlist"}
     assert decision.should_buy is False
     assert decision.reason in {
         "expected_value_below_minimum",
         "liquidity_grade_not_a_or_b",
         "non_com_domain_not_allowed",
     }
+    canonical = read_decisions(settings)[-1]
+    assert canonical["domain"] == "thinmarket.net"
+    assert canonical["final_decision"] in {"rejected", "watchlist"}
+    assert canonical["final_reason"] in {
+        "expected_value_below_minimum",
+        "liquidity_grade_not_a_or_b",
+        "non_com_domain_not_allowed",
+    }
+    assert canonical["passed_liquidity_filter"] is False
 
 
 @pytest.mark.asyncio
@@ -170,18 +204,19 @@ async def test_daily_and_weekly_budget_limits_block_purchases(tmp_path):
         )
     ]
 
-    daily_decision, _daily_repo, _daily_settings = await evaluate(
+    daily_decision, _daily_repo, daily_settings = await evaluate(
         tmp_path,
-        make_candidate("budgetdaily.com", price=12.0),
-        make_valuation("budgetdaily.com"),
+        make_candidate("budgetdaily.com", score=95, price=12.0),
+        make_valuation("budgetdaily.com", score=95),
         portfolio,
         max_daily_spend_usd=20.0,
         max_weekly_spend_usd=500.0,
     )
-    weekly_decision, _weekly_repo, _weekly_settings = await evaluate(
+    daily_canonical = read_decisions(daily_settings)[-1]
+    weekly_decision, _weekly_repo, weekly_settings = await evaluate(
         tmp_path,
-        make_candidate("budgetweekly.com", price=12.0),
-        make_valuation("budgetweekly.com"),
+        make_candidate("budgetweekly.com", score=95, price=12.0),
+        make_valuation("budgetweekly.com", score=95),
         portfolio,
         max_daily_spend_usd=500.0,
         max_weekly_spend_usd=20.0,
@@ -191,6 +226,13 @@ async def test_daily_and_weekly_budget_limits_block_purchases(tmp_path):
     assert daily_decision.reason == "max_daily_spend_reached"
     assert weekly_decision.action == "reject"
     assert weekly_decision.reason == "max_weekly_spend_reached"
+    weekly_canonical = read_decisions(weekly_settings)[-1]
+    assert daily_canonical["final_decision"] == "rejected"
+    assert daily_canonical["passed_budget_filter"] is False
+    assert daily_canonical["final_reason"] == "max_daily_spend_reached"
+    assert weekly_canonical["final_decision"] == "rejected"
+    assert weekly_canonical["passed_budget_filter"] is False
+    assert weekly_canonical["final_reason"] == "max_weekly_spend_reached"
 
 
 class FakeApprovedScorer:
@@ -260,6 +302,7 @@ async def test_dry_run_purchase_records_attempt_without_external_purchase_call(t
         godaddy_api_secret="fake-secret",
         pending_approvals_file=approvals_file,
         purchase_attempts_file=attempts_file,
+        acquisition_decisions_file=tmp_path / "acquisition_decisions.jsonl",
         telegram_bot_token=None,
         telegram_chat_id=None,
         risk={
