@@ -34,6 +34,7 @@ class ScheduledPublishingJob:
             "execution_mode": "scheduled_ephemeral_job",
             "started_at": started_at,
             "finished_at": None,
+            "workflow_stages": self._empty_workflow_stages(),
             "generated_count": 0,
             "upload_attempt_count": 0,
             "uploaded_count": 0,
@@ -74,11 +75,64 @@ class ScheduledPublishingJob:
                         and report["generation_result"].get("generation_attempted")
                     )
                 )
+                self._apply_generation_stages(report, report["generation_result"])
+                ready = self.pipeline.db.next_upload_candidate(
+                    max_attempts=int(
+                        self.config.get("scheduler", {}).get(
+                            "max_upload_attempts_per_video", 3
+                        )
+                    )
+                )
+            else:
+                self._mark_stage(
+                    report,
+                    "story_selected",
+                    True,
+                    queue_id=ready.get("id"),
+                    title=ready.get("title"),
+                    source="existing_upload_candidate",
+                )
+                self._mark_stage(
+                    report,
+                    "queued_ready",
+                    True,
+                    queue_id=ready.get("id"),
+                    status=ready.get("status"),
+                    source="existing_upload_candidate",
+                )
+
+            if ready is None:
+                reason = "Generation did not produce an approved READY video for upload"
+                report["upload_result"] = {
+                    "status": "generation_failed",
+                    "reason": reason,
+                    "uploaded": False,
+                }
+                report["status"] = "generation_failed"
+                self.pipeline.db.record_scheduler_event(
+                    "scheduled_job",
+                    "generation_failed",
+                    reason=reason,
+                    payload={
+                        "job_id": effective_job_id,
+                        "generation_result": report.get("generation_result"),
+                    },
+                )
+                LOGGER.error("upload_attempted=false reason=%s", reason)
+                self._refresh_metrics(report)
+                return report
 
             report["upload_attempt_count"] = 1
+            self._mark_stage(report, "upload_attempted", True, queue_id=ready.get("id"))
             upload_result = self.publisher.publish_next_ready()
             report["upload_result"] = upload_result
             report["uploaded_count"] = int(bool(upload_result.get("uploaded")))
+            LOGGER.info(
+                "uploaded_count=%s upload_status=%s queue_id=%s",
+                report["uploaded_count"],
+                upload_result.get("status"),
+                upload_result.get("queue_id"),
+            )
             report["status"] = self._result_status(upload_result)
             self._refresh_metrics(report)
         except Exception as exc:
@@ -112,7 +166,8 @@ class ScheduledPublishingJob:
     def _generate_one(self) -> dict[str, Any]:
         max_attempts = int(self.config.get("scheduler", {}).get("generation_attempt_limit", 3))
         attempts: list[dict[str, Any]] = []
-        existing_items = self.pipeline.db.list_for_processing(limit=max_attempts)
+        existing_limit = 0 if self.pipeline.publisher.real_upload_enabled else max_attempts
+        existing_items = self.pipeline.db.list_for_processing(limit=existing_limit)
         for item in existing_items:
             result = self._process_generation_item(item)
             attempts.append(result)
@@ -120,7 +175,7 @@ class ScheduledPublishingJob:
                 return self._generation_summary(attempts, result)
 
         for _ in range(max_attempts - len(attempts)):
-            item = self.pipeline.discover_and_queue()
+            item = self.pipeline.discover_and_queue(bypass_pending_limit=True)
             if not item:
                 break
             result = self._process_generation_item(item)
@@ -168,6 +223,7 @@ class ScheduledPublishingJob:
         return {
             "generation_attempted": True,
             "queue_id": queue_id,
+            "title": processed.get("title"),
             "status": processed.get("status"),
             "quality_score": processed.get("quality_score"),
             "approved_for_live_upload": approved_for_live_upload,
@@ -175,6 +231,8 @@ class ScheduledPublishingJob:
             "background_commercial_rights_verified": commercial_rights_verified,
             "upload_blocked_reason": processed.get("upload_blocked_reason"),
             "upload_ready": upload_ready,
+            "video_rendered": bool(processed.get("video_path")),
+            "validation_passed": bool(processed.get("status") == QueueStatus.READY and approved_for_live_upload),
         }
 
     def _generation_summary(
@@ -189,6 +247,63 @@ class ScheduledPublishingJob:
         if reason and not summary.get("upload_ready"):
             summary["reason"] = reason
         return summary
+
+    def _empty_workflow_stages(self) -> dict[str, Any]:
+        return {
+            "story_selected": {"passed": False, "detail": ""},
+            "video_rendered": {"passed": False, "detail": ""},
+            "validation_passed": {"passed": False, "detail": ""},
+            "queued_ready": {"passed": False, "detail": ""},
+            "upload_attempted": {"passed": False, "detail": ""},
+        }
+
+    def _apply_generation_stages(self, report: dict[str, Any], generation: dict[str, Any] | None) -> None:
+        generation = generation or {}
+        attempts = generation.get("attempts") if isinstance(generation.get("attempts"), list) else []
+        selected = generation
+        if attempts:
+            selected = next((attempt for attempt in attempts if attempt.get("upload_ready")), attempts[-1])
+        if selected.get("queue_id"):
+            self._mark_stage(
+                report,
+                "story_selected",
+                True,
+                queue_id=selected.get("queue_id"),
+                title=selected.get("title"),
+            )
+        self._mark_stage(
+            report,
+            "video_rendered",
+            bool(selected.get("video_rendered")),
+            queue_id=selected.get("queue_id"),
+            video_path_present=bool(selected.get("video_rendered")),
+        )
+        self._mark_stage(
+            report,
+            "validation_passed",
+            bool(selected.get("validation_passed")),
+            queue_id=selected.get("queue_id"),
+            quality_score=selected.get("quality_score"),
+            approved_for_live_upload=selected.get("approved_for_live_upload"),
+            blocked_reason=selected.get("upload_blocked_reason"),
+        )
+        self._mark_stage(
+            report,
+            "queued_ready",
+            bool(selected.get("upload_ready")),
+            queue_id=selected.get("queue_id"),
+            status=selected.get("status"),
+            commercial_rights_verified=selected.get("background_commercial_rights_verified"),
+        )
+
+    def _mark_stage(self, report: dict[str, Any], stage: str, passed: bool, **details: Any) -> None:
+        detail = " ".join(f"{key}={value}" for key, value in details.items() if value is not None)
+        report.setdefault("workflow_stages", self._empty_workflow_stages())[stage] = {
+            "passed": bool(passed),
+            "detail": detail,
+            **details,
+        }
+        LOGGER.info("%s=%s %s", stage, str(bool(passed)).lower(), detail)
 
     def _refresh_metrics(self, report: dict[str, Any]) -> None:
         report["metrics_refresh"]["attempted"] = True

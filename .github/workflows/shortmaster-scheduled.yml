@@ -94,9 +94,12 @@ jobs:
         run: |
           echo "event_name=${GITHUB_EVENT_NAME}"
           echo "manual_upload_mode=${{ inputs.upload_mode || 'not-applicable' }}"
+          echo "github_sha=${GITHUB_SHA}"
+          echo "checked_out_sha=$(git rev-parse HEAD)"
           echo "PAPER_MODE=${PAPER_MODE}"
           echo "ENABLE_REAL_UPLOAD=${ENABLE_REAL_UPLOAD}"
           echo "LIVE_UPLOAD_ENABLED=${LIVE_UPLOAD_ENABLED}"
+          echo "GENERATION_ATTEMPT_LIMIT=${GENERATION_ATTEMPT_LIMIT}"
           echo "YOUTUBE_PRIVACY_STATUS=${YOUTUBE_PRIVACY_STATUS}"
 
       - name: Restore persistent ShortMaster state

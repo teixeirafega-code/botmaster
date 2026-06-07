@@ -42,7 +42,7 @@ def test_scheduled_job_retries_generation_until_upload_ready_limit(tmp_path: Pat
     pipeline = ShortsMasterPipeline(config)
     calls = {"discover": 0, "process": 0, "publish": 0}
 
-    def fake_discover():
+    def fake_discover(**_kwargs):
         calls["discover"] += 1
         return {"id": 1, "status": "approved", "title": "Tema"}
 
@@ -69,7 +69,11 @@ def test_scheduled_job_retries_generation_until_upload_ready_limit(tmp_path: Pat
     assert result["generated_count"] == 1
     assert result["uploaded_count"] == 0
     assert result["generation_result"]["attempt_count"] == 3
-    assert calls == {"discover": 3, "process": 3, "publish": 1}
+    assert result["workflow_stages"]["story_selected"]["passed"] is True
+    assert result["workflow_stages"]["queued_ready"]["passed"] is False
+    assert result["workflow_stages"]["upload_attempted"]["passed"] is False
+    assert result["upload_result"]["status"] == "generation_failed"
+    assert calls == {"discover": 3, "process": 3, "publish": 0}
 
 
 def test_real_upload_job_generates_ready_item_then_uploads_private_video(tmp_path: Path) -> None:
@@ -79,7 +83,7 @@ def test_real_upload_job_generates_ready_item_then_uploads_private_video(tmp_pat
     pipeline = ShortsMasterPipeline(config)
     uploaded: list[int] = []
 
-    def fake_discover():
+    def fake_discover(**_kwargs):
         topic = TrendTopic(
             source="reddit_story",
             title="Reddit-style original story seed: A chave errada",
@@ -164,5 +168,10 @@ def test_real_upload_job_generates_ready_item_then_uploads_private_video(tmp_pat
     assert result["generated_count"] == 1
     assert result["uploaded_count"] == 1
     assert result["generation_result"]["upload_ready"] is True
+    assert result["workflow_stages"]["story_selected"]["passed"] is True
+    assert result["workflow_stages"]["video_rendered"]["passed"] is True
+    assert result["workflow_stages"]["validation_passed"]["passed"] is True
+    assert result["workflow_stages"]["queued_ready"]["passed"] is True
+    assert result["workflow_stages"]["upload_attempted"]["passed"] is True
     assert result["upload_result"]["youtube_video_id"] == "manual-real-upload-private-video"
     assert uploaded == [result["generation_result"]["queue_id"]]

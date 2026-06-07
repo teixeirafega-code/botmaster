@@ -51,9 +51,9 @@ class ShortsMasterPipeline:
             result["processed"] = self.process_approved(limit=3)
         return result
 
-    def discover_and_queue(self) -> dict[str, Any] | None:
+    def discover_and_queue(self, bypass_pending_limit: bool = False) -> dict[str, Any] | None:
         max_pending = int(self.config.get("queue", {}).get("max_pending", 25))
-        if self.db.pending_count() >= max_pending:
+        if not bypass_pending_limit and self.db.pending_count() >= max_pending:
             LOGGER.info("Queue has reached max pending count %s; skipping discovery", max_pending)
             return None
 
