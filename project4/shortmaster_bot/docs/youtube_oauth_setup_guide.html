@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>ShortsMaster Bot YouTube OAuth Setup Guide</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 1040px; margin: 32px auto; line-height: 1.5; color: #222; }
+    h1, h2, h3 { line-height: 1.2; }
+    code { background: #f2f2f2; padding: 1px 4px; border-radius: 4px; }
+    pre { background: #111; color: #eee; padding: 16px; overflow: auto; border-radius: 6px; }
+    a { color: #0645ad; }
+    .safe { background: #eef8f0; border-left: 4px solid #2f8f46; padding: 12px 16px; }
+    .warn { background: #fff7e6; border-left: 4px solid #b7791f; padding: 12px 16px; }
+  </style>
+</head>
+<body>
+  <h1>ShortsMaster Bot YouTube OAuth Setup Guide</h1>
+  <p>This guide sets up YouTube OAuth for ShortsMaster Bot without uploading anything. The safe validation command uses <code>channels.list(mine=true)</code> to detect the authenticated channel, compare it with the configured channel, and confirm credentials work.</p>
+
+  <h2>Project Paths</h2>
+  <ul>
+    <li>Project root: <code>C:\Users\tgt\Desktop\botmaster\project4\shortmaster_bot</code></li>
+    <li>OAuth client secret: <code>secrets\youtube_client_secret.json</code></li>
+    <li>OAuth token: <code>secrets\youtube_token.json</code></li>
+    <li>Config file: <code>config.yaml</code></li>
+    <li>Safe channel validation command: <code>python -m app.main youtube-auth-check</code></li>
+    <li>Pre-upload safety checklist: <code>python -m app.main pre-upload-checklist</code></li>
+  </ul>
+
+  <h2>1. Confirm Live Upload Safety Stays Off</h2>
+  <div class="safe">
+    <p>Keep live upload disabled while setting up OAuth.</p>
+  </div>
+  <pre><code>$env:PAPER_MODE="true"
+$env:ENABLE_REAL_UPLOAD="false"
+$env:LIVE_UPLOAD_ENABLED="false"
+python -m app.main pre-upload-checklist</code></pre>
+  <p>The checklist should show <code>real_upload_allowed: false</code>. This is expected and safe.</p>
+  <p>Real uploading requires <code>PAPER_MODE=false</code>, <code>ENABLE_REAL_UPLOAD=true</code>, <code>LIVE_UPLOAD_ENABLED=true</code>, a configured <code>channel_id</code>, per-video <code>approved_for_live_upload=true</code>, OAuth credentials, quota availability, and duplicate checks.</p>
+
+  <h2>2. Create a Google Cloud Project</h2>
+  <ol>
+    <li>Open the Google Cloud Console: <a href="https://console.cloud.google.com/">https://console.cloud.google.com/</a></li>
+    <li>Sign in with the Google account that owns or manages the YouTube channel.</li>
+    <li>Open the project selector at the top of the page.</li>
+    <li>Select <strong>New Project</strong>.</li>
+    <li>Use a clear name, for example <code>ShortsMaster Bot</code>.</li>
+    <li>Create the project and make sure it is selected.</li>
+  </ol>
+
+  <h2>3. Enable YouTube Data API v3</h2>
+  <ol>
+    <li>In the selected Google Cloud project, open <strong>APIs &amp; Services</strong> -> <strong>Library</strong>.</li>
+    <li>Search for <strong>YouTube Data API v3</strong>.</li>
+    <li>Open the API page.</li>
+    <li>Click <strong>Enable</strong>.</li>
+    <li>Open <strong>APIs &amp; Services</strong> -> <strong>Enabled APIs &amp; services</strong> and confirm the API is listed.</li>
+  </ol>
+
+  <h2>4. Configure the OAuth Consent Screen</h2>
+  <ol>
+    <li>Open <strong>APIs &amp; Services</strong> -> <strong>OAuth consent screen</strong>.</li>
+    <li>Choose <strong>External</strong> for normal public/testing use, or <strong>Internal</strong> only for a Google Workspace organization.</li>
+    <li>Set app name to <code>ShortsMaster Bot</code>.</li>
+    <li>Set user support and developer contact email.</li>
+    <li>Add scopes:
+      <ul>
+        <li><code>https://www.googleapis.com/auth/youtube.upload</code></li>
+        <li><code>https://www.googleapis.com/auth/youtube.readonly</code></li>
+      </ul>
+    </li>
+    <li>If the app is in testing mode, add the Google account that owns the channel as a test user.</li>
+  </ol>
+  <div class="warn">
+    <p>Use OAuth for YouTube. Service accounts are not supported for normal YouTube account access.</p>
+  </div>
+
+  <h2>5. Create OAuth Credentials</h2>
+  <ol>
+    <li>Open <strong>APIs &amp; Services</strong> -> <strong>Credentials</strong>.</li>
+    <li>Click <strong>Create Credentials</strong>.</li>
+    <li>Select <strong>OAuth client ID</strong>.</li>
+    <li>Application type: <strong>Desktop app</strong>.</li>
+    <li>Name: <code>ShortsMaster Bot Local</code>.</li>
+    <li>Click <strong>Create</strong>.</li>
+    <li>Download the JSON file.</li>
+  </ol>
+
+  <h2>6. Save youtube_client_secret.json</h2>
+  <pre><code>New-Item -ItemType Directory -Force -Path .\secrets</code></pre>
+  <p>Move or rename the downloaded OAuth client file to:</p>
+  <pre><code>C:\Users\tgt\Desktop\botmaster\project4\shortmaster_bot\secrets\youtube_client_secret.json</code></pre>
+  <p>Confirm <code>config.yaml</code> points to the same paths:</p>
+  <pre><code>publishing:
+  youtube_client_secrets_file: secrets/youtube_client_secret.json
+  youtube_token_file: secrets/youtube_token.json
+  oauth_mode: local_server</code></pre>
+  <p>Do not commit the <code>secrets</code> directory.</p>
+
+  <h2>7. Generate youtube_token.json</h2>
+  <pre><code>cd C:\Users\tgt\Desktop\botmaster\project4\shortmaster_bot
+$env:PAPER_MODE="true"
+$env:ENABLE_REAL_UPLOAD="false"
+$env:LIVE_UPLOAD_ENABLED="false"
+python -m app.main youtube-auth-check</code></pre>
+  <p>The command loads the client secret, confirms it is a Desktop App credential with a top-level <code>installed</code> section, archives stale tokens when the OAuth client changes, starts <code>run_local_server(port=0)</code> if a fresh token is needed, writes <code>secrets\youtube_token.json</code>, and calls <code>channels.list(mine=true)</code> to detect the authenticated channel. It does not upload a video.</p>
+
+  <h2>8. Detect and Configure the Channel</h2>
+  <p>After OAuth succeeds, the command prints the authenticated channel ID and title:</p>
+  <pre><code>{
+  "authenticated_channel_id": "UCxxxxxxxxxxxxxxxxxxxxxx",
+  "authenticated_channel_title": "Your Channel Name",
+  "configured_channel_id": "",
+  "matches_configured_channel": false,
+  "upload_attempted": false
+}</code></pre>
+  <p>Copy the channel ID and title into <code>config.yaml</code>:</p>
+  <pre><code>publishing:
+  channel_id: "UCxxxxxxxxxxxxxxxxxxxxxx"
+  channel_name: "Your Channel Name"</code></pre>
+  <p>Run <code>python -m app.main youtube-auth-check</code> again. The expected result is <code>"matches_configured_channel": true</code>.</p>
+
+  <h2>9. Validate Connection Without Uploading</h2>
+  <pre><code>python -m app.main youtube-auth-check
+python -m app.main pre-upload-checklist</code></pre>
+  <p>Validation passes when the channel is returned, <code>matches_configured_channel</code> is true, <code>upload_attempted</code> is false, and the pre-upload checklist still shows <code>real_upload_allowed: false</code> while live flags are off.</p>
+  <p>The <code>channels.list</code> method with <code>mine=true</code> retrieves channels owned by the authenticated user and has a quota cost of 1 unit.</p>
+
+  <h2>10. Troubleshooting</h2>
+  <h3>Client secret file not found</h3>
+  <p>Check that <code>secrets\youtube_client_secret.json</code> exists and matches <code>config.yaml</code>.</p>
+  <h3>missing required parameter: redirect_uri or redirect_uri_mismatch</h3>
+  <p>Create credentials as <strong>Desktop app</strong>. If you used a web client, create a new desktop OAuth client and replace the JSON file. Confirm <code>publishing.oauth_mode</code> is <code>local_server</code>. If you replaced the OAuth client, delete or let the bot archive the old <code>secrets\youtube_token.json</code> before trying again.</p>
+  <h3>Wrong channel detected</h3>
+  <p>Delete <code>secrets\youtube_token.json</code>, rerun <code>python -m app.main youtube-auth-check</code>, and sign in with the correct Google account.</p>
+
+  <h2>11. Live Upload Readiness Checklist</h2>
+  <pre><code>python -m app.main pre-upload-checklist --queue-id &lt;QUEUE_ID&gt;</code></pre>
+  <p>Required checks include disabled paper mode, real upload flags, channel ID, OAuth files, per-video live approval, duplicate protection, daily upload availability, YouTube quota availability, and video file existence.</p>
+  <pre><code>python -m app.main approve-live &lt;QUEUE_ID&gt;</code></pre>
+
+  <h2>References</h2>
+  <ul>
+    <li><a href="https://developers.google.com/youtube/v3/getting-started">YouTube Data API overview</a></li>
+    <li><a href="https://developers.google.com/youtube/v3/guides/authentication">YouTube OAuth guide</a></li>
+    <li><a href="https://developers.google.com/identity/protocols/oauth2/native-app">OAuth 2.0 for desktop apps</a></li>
+    <li><a href="https://developers.google.com/youtube/v3/docs/channels/list">YouTube channels.list</a></li>
+  </ul>
+</body>
+</html>

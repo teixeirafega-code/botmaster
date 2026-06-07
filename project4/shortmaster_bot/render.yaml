@@ -1,39 +1,10 @@
 services:
-  - type: web
-    name: botmaster-dashboard
-    runtime: python
-    plan: starter
-    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
-    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT
-    disk:
-      name: botmaster-dashboard-data
-      mountPath: /var/data
-      sizeGB: 1
-    envVars:
-      - key: PYTHON_VERSION
-        value: 3.12.0
-      - key: BOTMASTER_EMBEDDED_BOTS
-        value: "true"
-      - key: BOTMASTER_SHARED_DB
-        value: /var/data/botmaster_status.sqlite
-      - key: PAPER_MODE
-        value: "true"
-      - key: TELEGRAM_BOT_TOKEN
-        sync: false
-      - key: TELEGRAM_CHAT_ID
-        sync: false
-      - key: DASHBOARD_PASSWORD
-        sync: false
-      - key: BOTMASTER_STATUS_TOKEN
-        sync: false
-      - key: FLASK_SECRET_KEY
-        generateValue: true
   - type: worker
     name: botmaster-shortmaster
     runtime: docker
     plan: starter
-    rootDir: project4/shortmaster_bot
     autoDeploy: true
+    rootDir: project4/shortmaster_bot
     dockerfilePath: ./project4/shortmaster_bot/Dockerfile
     dockerContext: ./project4/shortmaster_bot
     dockerCommand: python -m app.main run

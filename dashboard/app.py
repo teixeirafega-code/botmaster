@@ -84,6 +84,12 @@ BOT_CONFIG = {
         "logs": ["logs/trend_hunter.log"],
         "states": ["state.json", "trend_hunter.db"],
     },
+    "shortmaster": {
+        "label": "ShortMaster",
+        "roots": [BOTMASTER_ROOT / "project4" / "shortmaster_bot"],
+        "logs": ["logs/shortsmaster.log"],
+        "states": ["data/shortsmaster.db", "reports/youtube_scheduler_report.json"],
+    },
 }
 
 
@@ -174,6 +180,7 @@ def build_snapshot() -> dict[str, Any]:
         _domain_card(process_lines, now),
         _asset_card(process_lines, now),
         _trend_card(process_lines, now),
+        _shortmaster_card(process_lines, now),
     ]
     cards = _merge_shared_statuses(cards, shared_statuses, now)
     _notify_domain_offline_if_needed(cards)
@@ -1430,6 +1437,30 @@ def _trend_card(process_lines: list[str], now: datetime) -> dict[str, Any]:
     }
 
 
+def _shortmaster_card(process_lines: list[str], now: datetime) -> dict[str, Any]:
+    root = _bot_root("shortmaster")
+    return {
+        "id": "shortmaster",
+        "name": "ShortMaster",
+        "accent": "blue",
+        "status": _bot_status(root, process_lines, None, now),
+        "last_update": "Sem heartbeat",
+        "last_update_ts": None,
+        "simulated_balance": 0.0,
+        "potential_profit": 0.0,
+        "opportunities_today": 0,
+        "metrics": [
+            {"label": "Videos/dia", "value": "0", "tone": "warning"},
+            {"label": "Fila para upload", "value": "0", "tone": "warning"},
+            {"label": "Fundos licenciados", "value": "0", "tone": "warning"},
+        ],
+        "details": [
+            {"label": "Proximo upload", "value": "Nao confirmado"},
+            {"label": "Uploads reais", "value": "Bloqueados"},
+        ],
+    }
+
+
 def _bot_root(bot_id: str) -> Path:
     for root in BOT_CONFIG[bot_id]["roots"]:
         if root.exists():
@@ -2112,6 +2143,37 @@ def _apply_shared_metrics(card: dict[str, Any], metrics: dict[str, Any]) -> None
             display_topics = [_trend_display_item(topic) for topic in topics[:5] if isinstance(topic, dict)]
             card["top_trends"] = display_topics
             card["details"] = [{"label": topic["name"], "value": topic["score_label"]} for topic in display_topics]
+    elif bot_id == "shortmaster":
+        daily_limit = int(_safe_float(metrics.get("daily_upload_limit")) or 0)
+        waiting_upload = int(_safe_float(metrics.get("waiting_upload")) or 0)
+        backgrounds = int(_safe_float(metrics.get("commercially_cleared_backgrounds")) or 0)
+        real_upload = metrics.get("real_upload_enabled") is True
+        credentials_ready = metrics.get("youtube_credentials_ready") is True
+        scheduler_paused = metrics.get("scheduler_paused") is True
+        _replace_metric(card, "Videos/dia", str(daily_limit), "good" if daily_limit > 0 else "warning")
+        _replace_metric(
+            card,
+            "Fila para upload",
+            str(waiting_upload),
+            "good" if waiting_upload > 0 else "warning",
+        )
+        _replace_metric(
+            card,
+            "Fundos licenciados",
+            str(backgrounds),
+            "good" if backgrounds > 0 else "danger",
+        )
+        card["details"] = [
+            {"label": "Proximo upload", "value": str(metrics.get("next_upload") or "Nao confirmado")},
+            {
+                "label": "Uploads reais",
+                "value": "Ativos" if real_upload and credentials_ready and not scheduler_paused else "Bloqueados",
+            },
+            {
+                "label": "Aprovacao automatica",
+                "value": "Ativa" if metrics.get("auto_approve_live_upload") is True else "Inativa",
+            },
+        ]
 
 
 def _replace_metric(card: dict[str, Any], label: str, value: str, tone: str | None = None) -> None:
