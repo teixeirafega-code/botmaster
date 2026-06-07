@@ -128,9 +128,16 @@ class ShortsMasterPipeline:
             LOGGER.warning("Queue item #%s needs a trusted source: %s", queue_id, reason)
             self.db.mark_needs_trusted_source(queue_id, reason, research.to_dict())
             return self.db.get_queue_item(queue_id) or item
-        if status == QueueStatus.READY and item.get("video_path") and item.get("script_json"):
+        existing_video_path = self.resolve_existing_video_path(item)
+        if (
+            status == QueueStatus.READY
+            and item.get("video_path")
+            and item.get("script_json")
+            and existing_video_path is not None
+            and existing_video_path.exists()
+        ):
             script = ContentScript.from_dict(json.loads(item["script_json"]))
-            video_path = Path(item["video_path"])
+            video_path = existing_video_path
         else:
             self.db.update_queue_item(queue_id, status=QueueStatus.GENERATING, error=None)
             script = self._script_for_item(item, topic, research)
@@ -345,3 +352,24 @@ class ShortsMasterPipeline:
             raw=dict(payload.get("raw", {})),
             observed_at=payload.get("observed_at"),
         )
+
+    def resolve_existing_video_path(self, item: dict[str, Any]) -> Path | None:
+        raw_path = item.get("video_path")
+        if not raw_path:
+            return None
+        path = Path(str(raw_path))
+        if path.exists():
+            return path
+        if path.name:
+            candidate = self.video.output_dir / path.name
+            if candidate.exists():
+                queue_id = int(item["id"])
+                self.db.update_queue_item(queue_id, video_path=str(candidate))
+                item["video_path"] = str(candidate)
+                LOGGER.info(
+                    "Resolved queue item #%s video path by filename: %s",
+                    queue_id,
+                    candidate,
+                )
+                return candidate
+        return path

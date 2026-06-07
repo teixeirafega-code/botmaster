@@ -49,7 +49,14 @@ class YouTubePublishScheduler:
 
         queue_id = int(item["id"])
         LOGGER.info("YouTube upload scheduler selected oldest candidate #%s: %s", queue_id, item["title"])
-        if item["status"] == QueueStatus.APPROVED or not item.get("video_path") or not item.get("script_json"):
+        resolved_video_path = self.pipeline.resolve_existing_video_path(item)
+        if (
+            item["status"] == QueueStatus.APPROVED
+            or not item.get("video_path")
+            or not item.get("script_json")
+            or resolved_video_path is None
+            or not resolved_video_path.exists()
+        ):
             try:
                 item = self.pipeline.process_item(item, publish_after_generate=False)
             except BackgroundLibraryUnavailableError as exc:
@@ -69,7 +76,7 @@ class YouTubePublishScheduler:
 
         topic = self.pipeline._topic_from_queue_item(item)
         script = ContentScript.from_dict(json.loads(item["script_json"]))
-        video_path = Path(item["video_path"])
+        video_path = self.pipeline.resolve_existing_video_path(item) or Path(item["video_path"])
 
         gate = self.pipeline.safety.evaluate_upload(
             self.pipeline.publisher.real_upload_enabled,

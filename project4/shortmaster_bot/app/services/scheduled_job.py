@@ -84,12 +84,30 @@ class ScheduledPublishingJob:
                     )
                 )
             else:
+                ready_video_path = self.pipeline.resolve_existing_video_path(ready)
                 self._mark_stage(
                     report,
                     "story_selected",
                     True,
                     queue_id=ready.get("id"),
                     title=ready.get("title"),
+                    source="existing_upload_candidate",
+                )
+                self._mark_stage(
+                    report,
+                    "video_rendered",
+                    bool(ready_video_path and ready_video_path.exists()),
+                    queue_id=ready.get("id"),
+                    video_path_present=bool(ready_video_path and ready_video_path.exists()),
+                    source="existing_upload_candidate",
+                )
+                self._mark_stage(
+                    report,
+                    "validation_passed",
+                    bool(ready.get("status") == QueueStatus.READY and int(ready.get("approved_for_live_upload") or 0) == 1),
+                    queue_id=ready.get("id"),
+                    quality_score=ready.get("quality_score"),
+                    approved_for_live_upload=bool(int(ready.get("approved_for_live_upload") or 0) == 1),
                     source="existing_upload_candidate",
                 )
                 self._mark_stage(
@@ -127,6 +145,34 @@ class ScheduledPublishingJob:
             upload_result = self.publisher.publish_next_ready()
             report["upload_result"] = upload_result
             report["uploaded_count"] = int(bool(upload_result.get("uploaded")))
+            if upload_result.get("uploaded"):
+                uploaded_item = self.pipeline.db.get_queue_item(int(upload_result.get("queue_id") or 0)) or {}
+                uploaded_video_path = self.pipeline.resolve_existing_video_path(uploaded_item)
+                self._mark_stage(
+                    report,
+                    "video_rendered",
+                    True,
+                    queue_id=upload_result.get("queue_id"),
+                    video_path_present=bool(uploaded_video_path and uploaded_video_path.exists()),
+                    source="uploaded",
+                )
+                self._mark_stage(
+                    report,
+                    "validation_passed",
+                    True,
+                    queue_id=upload_result.get("queue_id"),
+                    quality_score=uploaded_item.get("quality_score"),
+                    approved_for_live_upload=True,
+                    source="uploaded",
+                )
+                self._mark_stage(
+                    report,
+                    "queued_ready",
+                    True,
+                    queue_id=upload_result.get("queue_id"),
+                    status=uploaded_item.get("status"),
+                    source="uploaded",
+                )
             LOGGER.info(
                 "uploaded_count=%s upload_status=%s queue_id=%s",
                 report["uploaded_count"],

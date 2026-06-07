@@ -100,6 +100,68 @@ def test_scheduler_uploads_oldest_ready_video_first_with_fake_publisher(tmp_path
     assert pipeline.db.get_queue_item(int(second["id"]))["status"] == QueueStatus.READY
 
 
+def test_scheduler_resolves_stale_absolute_video_path_by_filename(tmp_path: Path) -> None:
+    config = live_config(tmp_path)
+    pipeline = ShortsMasterPipeline(config)
+    item = ready_item(pipeline, tmp_path, "Relato com caminho antigo", title="Envio com caminho antigo")
+    original_name = Path(str(item["video_path"])).name
+    restored_path = pipeline.video.output_dir / original_name
+    restored_path.write_bytes(b"restored rendered video")
+    stale_path = Path("/home/runner/work/botmaster/botmaster/project4/shortmaster_bot/videos/rendered") / original_name
+    pipeline.db.update_queue_item(int(item["id"]), video_path=str(stale_path))
+    uploaded_paths: list[Path] = []
+
+    def fake_publish(video_path, _script, queue_item):
+        uploaded_paths.append(Path(video_path))
+        return f"real-video-{queue_item['id']}"
+
+    pipeline.publisher.publish = fake_publish
+
+    result = YouTubePublishScheduler(pipeline, config).publish_next_ready()
+
+    assert result["status"] == "success"
+    assert result["uploaded"] is True
+    assert uploaded_paths == [restored_path]
+    assert pipeline.db.get_queue_item(int(item["id"]))["video_path"] == str(restored_path)
+
+
+def test_scheduler_rerenders_ready_item_when_cached_video_is_missing(tmp_path: Path) -> None:
+    config = live_config(tmp_path)
+    pipeline = ShortsMasterPipeline(config)
+    item = ready_item(pipeline, tmp_path, "Relato sem MP4 restaurado", title="Envio refeito")
+    missing_path = Path(str(item["video_path"]))
+    missing_path.unlink()
+    calls = {"process": 0}
+    uploaded_paths: list[Path] = []
+
+    def fake_process(process_item, publish_after_generate=False):
+        calls["process"] += 1
+        assert publish_after_generate is False
+        rerendered = pipeline.video.output_dir / "rerendered-ready-video.mp4"
+        rerendered.write_bytes(b"rerendered video")
+        pipeline.db.update_queue_item(
+            int(process_item["id"]),
+            status=QueueStatus.READY,
+            video_path=str(rerendered),
+            approved_for_live_upload=1,
+        )
+        return pipeline.db.get_queue_item(int(process_item["id"])) or process_item
+
+    def fake_publish(video_path, _script, queue_item):
+        uploaded_paths.append(Path(video_path))
+        return f"real-video-{queue_item['id']}"
+
+    pipeline.process_item = fake_process
+    pipeline.publisher.publish = fake_publish
+
+    result = YouTubePublishScheduler(pipeline, config).publish_next_ready()
+
+    assert result["status"] == "success"
+    assert result["uploaded"] is True
+    assert calls["process"] == 1
+    assert uploaded_paths == [pipeline.video.output_dir / "rerendered-ready-video.mp4"]
+
+
 def test_auto_approval_requires_quality_safety_and_verified_background_rights(tmp_path: Path) -> None:
     config = live_config(tmp_path)
     config["queue"]["auto_approve_live_upload"] = True

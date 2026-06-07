@@ -30,6 +30,10 @@ def test_scheduled_job_uploads_at_most_one_video_and_exits(tmp_path: Path) -> No
     assert result["generated_count"] == 0
     assert result["upload_attempt_count"] == 1
     assert result["uploaded_count"] == 1
+    assert result["workflow_stages"]["video_rendered"]["passed"] is True
+    assert result["workflow_stages"]["validation_passed"]["passed"] is True
+    assert result["workflow_stages"]["queued_ready"]["passed"] is True
+    assert result["workflow_stages"]["upload_attempted"]["passed"] is True
     assert uploaded == [int(first["id"])]
     assert pipeline.db.get_queue_item(int(second["id"]))["youtube_video_id"] is None
     assert (tmp_path / "reports" / "scheduled_job_report.json").exists()

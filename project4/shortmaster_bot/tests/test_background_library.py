@@ -102,6 +102,19 @@ def test_random_selection_uses_only_approved_backgrounds(tmp_path: Path) -> None
     assert "blocked.mp4" not in selected
 
 
+def test_video_output_path_gets_unique_run_suffix_when_file_exists(tmp_path: Path, monkeypatch) -> None:
+    assembler = VideoAssembler(library_config(tmp_path))
+    base = assembler.output_dir / "000005-a-mulher-do-shopping.mp4"
+    base.write_bytes(b"existing render")
+    monkeypatch.setenv("GITHUB_RUN_ID", "27104314735")
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "1")
+
+    output_path = assembler._output_path(5, "A mulher do shopping")
+
+    assert output_path != base
+    assert output_path.name == "000005-a-mulher-do-shopping-27104314735-1.mp4"
+
+
 def test_short_background_is_looped_to_narration_duration(tmp_path: Path) -> None:
     assembler = VideoAssembler(library_config(tmp_path))
     source = ColorClip(size=(90, 160), color=(10, 20, 30))

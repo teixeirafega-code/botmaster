@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 import random
 import re
 import unicodedata
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -76,7 +78,7 @@ class VideoAssembler:
         if not image_paths:
             raise VideoAssemblyError("At least one image is required")
 
-        output_path = self.output_dir / f"{queue_id:06d}-{safe_filename(script.title)}.mp4"
+        output_path = self._output_path(queue_id, script.title)
         audio = AudioFileClip(str(voice_path))
         duration = float(audio.duration or self.video_config.get("target_seconds", 60))
         scene_duration = max(1.0, duration / len(image_paths))
@@ -144,7 +146,7 @@ class VideoAssembler:
         queue_id: int,
         asset: BackgroundAsset,
     ) -> Path:
-        output_path = self.output_dir / f"{queue_id:06d}-{safe_filename(script.title)}.mp4"
+        output_path = self._output_path(queue_id, script.title)
         audio = AudioFileClip(str(voice_path))
         duration = float(audio.duration or self.video_config.get("target_seconds", 60))
         source = VideoFileClip(str(asset.path), audio=False)
@@ -239,7 +241,7 @@ class VideoAssembler:
         )
 
     def _assemble_retention_background(self, script: ContentScript, voice_path: Path, queue_id: int) -> Path:
-        output_path = self.output_dir / f"{queue_id:06d}-{safe_filename(script.title)}.mp4"
+        output_path = self._output_path(queue_id, script.title)
         audio = AudioFileClip(str(voice_path))
         duration = float(audio.duration or self.video_config.get("target_seconds", 60))
         loop_seconds = max(4.0, float(self.story_background_config.get("loop_seconds", 8.0)))
@@ -289,6 +291,24 @@ class VideoAssembler:
                 close = getattr(clip, "close", None)
                 if callable(close):
                     close()
+
+    def _output_path(self, queue_id: int, title: str) -> Path:
+        base = self.output_dir / f"{queue_id:06d}-{safe_filename(title)}.mp4"
+        if not base.exists():
+            return base
+        run_id = clean_text(os.getenv("GITHUB_RUN_ID") or os.getenv("SHORTMASTER_RUN_ID") or "")
+        run_attempt = clean_text(os.getenv("GITHUB_RUN_ATTEMPT") or "")
+        if run_id:
+            token = f"{run_id}-{run_attempt}" if run_attempt else run_id
+        else:
+            token = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
+        token = safe_filename(token) or datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
+        for index in range(100):
+            suffix = token if index == 0 else f"{token}-{index + 1}"
+            candidate = base.with_name(f"{base.stem}-{suffix}{base.suffix}")
+            if not candidate.exists():
+                return candidate
+        raise VideoAssemblyError(f"Could not allocate a unique video output path for queue #{queue_id}")
 
     def _approved_background_categories(self) -> dict[str, list[str]]:
         configured = self.story_background_config.get("approved_categories")
