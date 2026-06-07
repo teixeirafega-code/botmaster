@@ -186,5 +186,6 @@ jobs:
           path: |
             project4/shortmaster_bot/logs/
             project4/shortmaster_bot/reports/
+            project4/shortmaster_bot/videos/rendered/
           if-no-files-found: warn
           retention-days: 30
