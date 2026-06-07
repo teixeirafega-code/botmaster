@@ -1,5 +1,9 @@
 name: ShortMaster scheduled publishing
 
+run-name: >-
+  ShortMaster
+  ${{ github.event_name == 'workflow_dispatch' && inputs.upload_mode || 'scheduled' }}
+
 on:
   schedule:
     # America/Sao_Paulo (UTC-3): 22:00, 08:00, 11:30, 15:00, 18:30.
@@ -10,11 +14,14 @@ on:
     - cron: "30 21 * * *"
   workflow_dispatch:
     inputs:
-      publish:
-        description: "Perform a real private upload"
+      upload_mode:
+        description: "Manual run mode"
         required: true
-        type: boolean
-        default: false
+        type: choice
+        default: paper
+        options:
+          - paper
+          - real_upload
 
 permissions:
   contents: read
@@ -32,9 +39,9 @@ jobs:
         working-directory: project4/shortmaster_bot
     env:
       SHORTSMASTER_ENV: production
-      PAPER_MODE: ${{ (github.event_name == 'schedule' || inputs.publish == true) && 'false' || 'true' }}
-      ENABLE_REAL_UPLOAD: ${{ (github.event_name == 'schedule' || inputs.publish == true) && 'true' || 'false' }}
-      LIVE_UPLOAD_ENABLED: ${{ (github.event_name == 'schedule' || inputs.publish == true) && 'true' || 'false' }}
+      PAPER_MODE: ${{ (github.event_name == 'schedule' || inputs.upload_mode == 'real_upload') && 'false' || 'true' }}
+      ENABLE_REAL_UPLOAD: ${{ (github.event_name == 'schedule' || inputs.upload_mode == 'real_upload') && 'true' || 'false' }}
+      LIVE_UPLOAD_ENABLED: ${{ (github.event_name == 'schedule' || inputs.upload_mode == 'real_upload') && 'true' || 'false' }}
       MANUAL_APPROVAL_REQUIRED: "false"
       AUTO_APPROVE_LIVE_UPLOAD: "true"
       DAILY_UPLOAD_LIMIT: "5"
@@ -78,6 +85,15 @@ jobs:
       - name: Install Python dependencies
         run: python -m pip install --disable-pip-version-check -r requirements.txt
 
+      - name: Confirm selected run mode
+        run: |
+          echo "event_name=${GITHUB_EVENT_NAME}"
+          echo "manual_upload_mode=${{ inputs.upload_mode || 'not-applicable' }}"
+          echo "PAPER_MODE=${PAPER_MODE}"
+          echo "ENABLE_REAL_UPLOAD=${ENABLE_REAL_UPLOAD}"
+          echo "LIVE_UPLOAD_ENABLED=${LIVE_UPLOAD_ENABLED}"
+          echo "YOUTUBE_PRIVACY_STATUS=${YOUTUBE_PRIVACY_STATUS}"
+
       - name: Restore persistent ShortMaster state
         uses: actions/cache/restore@v4
         with:
@@ -86,8 +102,8 @@ jobs:
           restore-keys: |
             shortmaster-state-
 
-      - name: Validate production secrets
-        if: ${{ github.event_name == 'schedule' || inputs.publish == true }}
+      - name: Validate real upload secrets
+        if: ${{ github.event_name == 'schedule' || inputs.upload_mode == 'real_upload' }}
         run: |
           python -c "import os; required=['YOUTUBE_CHANNEL_ID','YOUTUBE_CLIENT_SECRET_JSON','YOUTUBE_TOKEN_JSON']; missing=[name for name in required if not os.getenv(name)]; assert not missing, 'Missing GitHub Actions secrets: ' + ', '.join(missing)"
 
@@ -100,7 +116,55 @@ jobs:
       - name: Write workflow summary
         if: always()
         run: |
-          python -c "import json,pathlib,os; p=pathlib.Path('reports/scheduled_job_report.json'); d=json.loads(p.read_text()) if p.exists() else {'status':'missing_report'}; s=os.environ['GITHUB_STEP_SUMMARY']; open(s,'a',encoding='utf-8').write('# ShortMaster scheduled job\n\n```json\n'+json.dumps(d,indent=2,ensure_ascii=False)+'\n```\n')"
+          python - <<'PY'
+          import json
+          import os
+          import pathlib
+
+          report_path = pathlib.Path("reports/scheduled_job_report.json")
+          report = (
+              json.loads(report_path.read_text(encoding="utf-8"))
+              if report_path.exists()
+              else {"status": "missing_report"}
+          )
+          summary = pathlib.Path(os.environ["GITHUB_STEP_SUMMARY"])
+          summary.write_text(
+              "# ShortMaster scheduled job\n\n"
+              f"- event: {os.environ.get('GITHUB_EVENT_NAME', '')}\n"
+              f"- manual_upload_mode: ${{ inputs.upload_mode || 'not-applicable' }}\n"
+              f"- PAPER_MODE: {os.environ.get('PAPER_MODE', '')}\n"
+              f"- ENABLE_REAL_UPLOAD: {os.environ.get('ENABLE_REAL_UPLOAD', '')}\n"
+              f"- LIVE_UPLOAD_ENABLED: {os.environ.get('LIVE_UPLOAD_ENABLED', '')}\n\n"
+              "```json\n"
+              + json.dumps(report, indent=2, ensure_ascii=False)
+              + "\n```\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Require real upload for manual real_upload runs
+        if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.upload_mode == 'real_upload' }}
+        run: |
+          python - <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          report_path = pathlib.Path("reports/scheduled_job_report.json")
+          if not report_path.exists():
+              raise SystemExit("scheduled_job_report.json was not created")
+          report = json.loads(report_path.read_text(encoding="utf-8"))
+          if int(report.get("uploaded_count") or 0) < 1:
+              reason = (
+                  report.get("error")
+                  or report.get("upload_result", {}).get("reason")
+                  or report.get("generation_result", {}).get("reason")
+                  or report.get("status")
+                  or "manual real_upload run completed without an upload"
+              )
+              raise SystemExit(f"manual real_upload did not upload a video: {reason}")
+          print("manual real_upload uploaded one video")
+          PY
 
       - name: Save persistent ShortMaster state
         if: always()
