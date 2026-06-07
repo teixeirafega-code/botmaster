@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import re
 import time
 from dataclasses import dataclass, field
@@ -9,6 +10,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import requests
+from requests.auth import HTTPBasicAuth
 
 from app.models import ResearchBrief, TrendTopic
 from app.utils.retry import retry
@@ -36,6 +38,8 @@ class RedditStoryCandidate:
     author: str = ""
     comment_id: str = ""
     comment_score: int = 0
+    source_platform: str = "Reddit"
+    fallback_reason: str = ""
 
     @property
     def created_at_iso(self) -> str:
@@ -63,6 +67,9 @@ class RedditStoryService:
         )
         self.last_candidates: list[RedditStoryCandidate] = []
         self.last_rejections: list[dict[str, Any]] = []
+        self.last_source_failures: list[dict[str, str]] = []
+        self._oauth_token: str = ""
+        self._oauth_token_expires_at = 0.0
 
     @property
     def enabled(self) -> bool:
@@ -86,6 +93,7 @@ class RedditStoryService:
     def fetch_candidates(self) -> list[RedditStoryCandidate]:
         self.last_candidates = []
         self.last_rejections = []
+        self.last_source_failures = []
         for subreddit in self.story_config.get("subreddits", []):
             subreddit = str(subreddit).strip()
             if not subreddit:
@@ -99,6 +107,8 @@ class RedditStoryService:
                 candidate = self._candidate_from_post(post, subreddit)
                 if candidate and not candidate.rejection_reasons:
                     self.last_candidates.append(candidate)
+        if not self.last_candidates and self._original_fallback_enabled():
+            self.last_candidates.extend(self._fallback_candidates())
         return list(self.last_candidates)
 
     @retry(attempts=3, delay_seconds=1.5, exceptions=(requests.RequestException,))
@@ -117,9 +127,43 @@ class RedditStoryService:
         )
         if response.status_code == 403:
             LOGGER.warning("Reddit blocked r/%s story JSON with HTTP 403", subreddit)
-            return []
+            self._record_source_failure(subreddit, "public_json", "HTTP 403")
+            return self._fetch_subreddit_posts_oauth(subreddit, sort, params)
         if response.status_code == 429:
             raise requests.RequestException("Reddit rate limit reached")
+        response.raise_for_status()
+        payload = response.json()
+        return [child.get("data", {}) for child in payload.get("data", {}).get("children", [])]
+
+    @retry(attempts=2, delay_seconds=1.0, exceptions=(requests.RequestException,))
+    def _fetch_subreddit_posts_oauth(
+        self,
+        subreddit: str,
+        sort: str,
+        params: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        token = self._reddit_oauth_token()
+        if not token:
+            LOGGER.warning("Reddit official API fallback skipped for r/%s: credentials unavailable", subreddit)
+            self._record_source_failure(subreddit, "official_api", "credentials unavailable")
+            return []
+        headers = {"Authorization": f"Bearer {token}", "User-Agent": self._user_agent()}
+        response = self.session.get(
+            f"https://oauth.reddit.com/r/{subreddit}/{sort}",
+            params=params,
+            headers=headers,
+            timeout=float(self.story_config.get("timeout_seconds", 20)),
+        )
+        if response.status_code in {401, 403}:
+            self._record_source_failure(subreddit, "official_api", f"HTTP {response.status_code}")
+            LOGGER.warning(
+                "Reddit official API fallback failed for r/%s with HTTP %s",
+                subreddit,
+                response.status_code,
+            )
+            return []
+        if response.status_code == 429:
+            raise requests.RequestException("Reddit official API rate limit reached")
         response.raise_for_status()
         payload = response.json()
         return [child.get("data", {}) for child in payload.get("data", {}).get("children", [])]
@@ -217,8 +261,31 @@ class RedditStoryService:
             params={"sort": "top", "limit": int(self.story_config.get("comment_fetch_limit", 8)), "raw_json": 1},
             timeout=float(self.story_config.get("timeout_seconds", 20)),
         )
-        if response.status_code in {403, 404}:
+        if response.status_code == 403:
+            return self._fetch_comments_oauth(post_id)
+        if response.status_code == 404:
             return []
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, list) or len(payload) < 2:
+            return []
+        return [child.get("data", {}) for child in payload[1].get("data", {}).get("children", [])]
+
+    @retry(attempts=2, delay_seconds=1.0, exceptions=(requests.RequestException,))
+    def _fetch_comments_oauth(self, post_id: str) -> list[dict[str, Any]]:
+        token = self._reddit_oauth_token()
+        if not token:
+            return []
+        response = self.session.get(
+            f"https://oauth.reddit.com/comments/{post_id}",
+            params={"sort": "top", "limit": int(self.story_config.get("comment_fetch_limit", 8)), "raw_json": 1},
+            headers={"Authorization": f"Bearer {token}", "User-Agent": self._user_agent()},
+            timeout=float(self.story_config.get("timeout_seconds", 20)),
+        )
+        if response.status_code in {401, 403, 404}:
+            return []
+        if response.status_code == 429:
+            raise requests.RequestException("Reddit official comments API rate limit reached")
         response.raise_for_status()
         payload = response.json()
         if not isinstance(payload, list) or len(payload) < 2:
@@ -367,10 +434,11 @@ class RedditStoryService:
             "source_text_hash": candidate.source_hash,
             "source_text_word_count": len(candidate.source_text.split()),
             "story_beats": self.extract_core_narrative(candidate.source_text, candidate.priority_labels),
+            "claim_status": "original_story_seed" if candidate.source_kind == "original_story_seed" else "unverified_reddit_story",
         }
         return TrendTopic(
             source=self.source_name,
-            title=f"Reddit story from r/{candidate.subreddit}: {candidate.title}",
+            title=self._topic_title(candidate),
             url=candidate.source_url,
             score=candidate.selection_score,
             niche="reddit_story",
@@ -430,9 +498,10 @@ class RedditStoryService:
         return report
 
     def story_source_report_from_candidate(self, candidate: RedditStoryCandidate) -> dict[str, Any]:
+        is_original_fallback = candidate.source_kind == "original_story_seed"
         return {
             "content_mode": "reddit_story",
-            "source_platform": "Reddit",
+            "source_platform": candidate.source_platform,
             "source_subreddit": candidate.subreddit,
             "source_url": candidate.source_url,
             "source_kind": candidate.source_kind,
@@ -446,6 +515,8 @@ class RedditStoryService:
             "comment_score": candidate.comment_score,
             "minimum_upvote_threshold": int(self.story_config.get("min_upvotes", 2500)),
             "minimum_comment_threshold": int(self.story_config.get("min_comments", 120)),
+            "engagement_threshold_met": (candidate.ups >= int(self.story_config.get("min_upvotes", 2500)) and candidate.comments >= int(self.story_config.get("min_comments", 120))) if not is_original_fallback else None,
+            "fallback_reason": candidate.fallback_reason,
             "priority_labels": list(candidate.priority_labels),
             "selection_score": round(candidate.selection_score, 2),
             "source_text_sha256": candidate.source_hash,
@@ -460,7 +531,11 @@ class RedditStoryService:
                 "tier_2": ["slime", "kinetic_sand", "soap_cutting"],
             },
             "freshness_window_hours": int(self.story_config.get("freshness_window_hours", 168)),
-            "trust_validation": "auditable Reddit URL with engagement thresholds; anecdote must be framed as unverified",
+            "trust_validation": (
+                "original ShortMaster-owned story seed used only after Reddit source failure; do not present as fact"
+                if is_original_fallback
+                else "auditable Reddit URL with engagement thresholds; anecdote must be framed as unverified"
+            ),
         }
 
     def build_research_brief(self, topic: TrendTopic) -> ResearchBrief:
@@ -470,32 +545,46 @@ class RedditStoryService:
         freshness_threshold = float(self.story_config.get("freshness_min_score", 70))
         freshness_score, freshness_notes = self._freshness_score(created_at, freshness_window)
         trust_score, trust_notes = self._story_trust_score(report)
-        facts = [
-            (
-                f"Reddit story source is r/{report.get('source_subreddit', 'unknown')} "
-                f"with URL {report.get('source_url', topic.url)}."
-            ),
-            (
-                f"Reddit engagement passed thresholds with {report.get('upvotes', 0)} upvotes "
-                f"and {report.get('comments', 0)} comments."
-            ),
-            (
-                "The script must frame the source as an unverified Reddit story and rewrite the narrative from scratch."
-            ),
-        ]
+        is_original_fallback = report.get("source_kind") == "original_story_seed"
+        if is_original_fallback:
+            facts = [
+                "ShortMaster selected an original story seed after live Reddit fetching failed.",
+                "The seed is owned by ShortMaster and is safe to rewrite for entertainment.",
+                "The public script must not claim the story is verified or sourced from a Reddit user.",
+            ]
+        else:
+            facts = [
+                (
+                    f"Reddit story source is r/{report.get('source_subreddit', 'unknown')} "
+                    f"with URL {report.get('source_url', topic.url)}."
+                ),
+                (
+                    f"Reddit engagement passed thresholds with {report.get('upvotes', 0)} upvotes "
+                    f"and {report.get('comments', 0)} comments."
+                ),
+                (
+                    "The script must frame the source as an unverified Reddit story and rewrite the narrative from scratch."
+                ),
+            ]
         labels = report.get("priority_labels") or []
         if labels:
             facts.append("Story priority labels include " + ", ".join(str(label) for label in labels[:4]) + ".")
         source_summary = {
-            "source": "Reddit",
+            "source": "ShortMaster original story seed" if is_original_fallback else "Reddit",
             "title": clean_text(str(report.get("source_title", topic.title))),
             "summary": (
-                "Auditable Reddit story source selected by engagement, comments, source subreddit, "
+                "Original internal story seed selected because Reddit fetch failed; no Reddit user text is copied."
+                if is_original_fallback
+                else "Auditable Reddit story source selected by engagement, comments, source subreddit, "
                 "and retention category. Raw Reddit text is not included in generated reports."
             ),
             "url": clean_text(str(report.get("source_url", topic.url))),
             "source_trust_score": round(trust_score, 1),
-            "source_trust_reason": "Reddit anecdote is auditable but unverified; script requires explicit story framing.",
+            "source_trust_reason": (
+                "Original owned story seed; safe for entertainment but not a factual claim."
+                if is_original_fallback
+                else "Reddit anecdote is auditable but unverified; script requires explicit story framing."
+            ),
         }
         if created_at:
             source_summary["source_date"] = created_at
@@ -503,7 +592,7 @@ class RedditStoryService:
         if created_at:
             source_dates.append(
                 {
-                    "source": "Reddit",
+                    "source": "ShortMaster original story seed" if is_original_fallback else "Reddit",
                     "title": clean_text(str(report.get("source_title", topic.title))),
                     "url": clean_text(str(report.get("source_url", topic.url))),
                     "source_date": created_at,
@@ -522,7 +611,11 @@ class RedditStoryService:
             dates_times=[created_at] if created_at else [],
             locations=[],
             uncertainty_notes=[
-                "Reddit anecdotes are not independently verified; narration must not present them as fact.",
+                (
+                    "Fallback story seed is original entertainment material; narration must not present it as verified fact."
+                    if is_original_fallback
+                    else "Reddit anecdotes are not independently verified; narration must not present them as fact."
+                ),
                 "Reddit source text and comments must never be copied verbatim.",
             ],
             source_urls=[clean_text(str(report.get("source_url", topic.url)))],
@@ -561,6 +654,10 @@ class RedditStoryService:
         ]
 
     def _story_trust_score(self, report: dict[str, Any]) -> tuple[float, list[str]]:
+        if report.get("source_kind") == "original_story_seed":
+            return 95.0, [
+                "Original ShortMaster story seed is owned/internal and avoids unverifiable factual claims."
+            ]
         notes = ["Reddit URL is auditable; anecdote remains unverified and must be framed as a story."]
         score = 72.0
         if report.get("source_url"):
@@ -584,6 +681,126 @@ class RedditStoryService:
             "priority_labels": candidate.priority_labels,
             "rejection_reasons": candidate.rejection_reasons,
         }
+
+    def _reddit_oauth_token(self) -> str:
+        if not self._official_api_enabled():
+            return ""
+        if self._oauth_token and time.time() < self._oauth_token_expires_at - 60:
+            return self._oauth_token
+        client_id = os.getenv(str(self.story_config.get("client_id_env", "REDDIT_CLIENT_ID")))
+        client_secret = os.getenv(str(self.story_config.get("client_secret_env", "REDDIT_CLIENT_SECRET")))
+        if not client_id or not client_secret:
+            return ""
+        response = self.session.post(
+            "https://www.reddit.com/api/v1/access_token",
+            auth=HTTPBasicAuth(client_id, client_secret),
+            data={"grant_type": "client_credentials"},
+            headers={"User-Agent": self._user_agent()},
+            timeout=float(self.story_config.get("timeout_seconds", 20)),
+        )
+        if response.status_code == 429:
+            raise requests.RequestException("Reddit OAuth token rate limit reached")
+        response.raise_for_status()
+        payload = response.json()
+        token = clean_text(str(payload.get("access_token", "")))
+        if not token:
+            raise requests.RequestException("Reddit OAuth token response did not include access_token")
+        self._oauth_token = token
+        self._oauth_token_expires_at = time.time() + float(payload.get("expires_in") or 3600)
+        return self._oauth_token
+
+    def _official_api_enabled(self) -> bool:
+        return bool(self.story_config.get("official_api_enabled", True))
+
+    def _original_fallback_enabled(self) -> bool:
+        return bool(self.story_config.get("allow_original_story_fallback", True))
+
+    def _record_source_failure(self, subreddit: str, source_type: str, reason: str) -> None:
+        self.last_source_failures.append(
+            {
+                "subreddit": subreddit,
+                "source_type": source_type,
+                "reason": reason,
+            }
+        )
+
+    def _user_agent(self) -> str:
+        return str(
+            self.story_config.get(
+                "user_agent",
+                "ShortsMasterBot/1.0 reddit story shorts mode",
+            )
+        )
+
+    def _fallback_candidates(self) -> list[RedditStoryCandidate]:
+        seed = self._fallback_story_seed()
+        now = time.time()
+        failure_summary = "; ".join(
+            f"{item['subreddit']}:{item['source_type']}:{item['reason']}"
+            for item in self.last_source_failures[:8]
+        )
+        reason = (
+            "Live Reddit source fetch failed or returned no eligible stories"
+            + (f" ({failure_summary})" if failure_summary else "")
+        )
+        candidate = RedditStoryCandidate(
+            subreddit="original-story-seed",
+            post_id=seed["id"],
+            title=seed["title"],
+            source_text=seed["source_text"],
+            source_url=f"internal://shortmaster/original-story-seeds/{seed['id']}",
+            source_kind="original_story_seed",
+            ups=0,
+            comments=0,
+            upvote_ratio=1.0,
+            created_utc=now,
+            priority_labels=seed["priority_labels"],
+            selection_score=120_000.0,
+            source_platform="ShortMaster",
+            fallback_reason=reason,
+        )
+        LOGGER.warning("Using original Reddit-style story fallback: %s", reason)
+        return [candidate]
+
+    def _fallback_story_seed(self) -> dict[str, Any]:
+        seeds = [
+            {
+                "id": "night-shift-mall-001",
+                "title": "A ligação estranha no shopping vazio",
+                "priority_labels": ["scary", "mystery"],
+                "source_text": (
+                    "Original story seed: mall encounter, overnight security shift, stranger asks for help, "
+                    "phone call describes the narrator, footsteps in a closed corridor, final discovery on camera. "
+                    "Rewrite in Brazilian Portuguese with suspense; do not claim it is verified."
+                ),
+            },
+            {
+                "id": "wrong-apartment-key-002",
+                "title": "A chave que abriu o apartamento errado",
+                "priority_labels": ["mystery", "unbelievable"],
+                "source_text": (
+                    "Original story seed: tired renter receives a spare key, opens the wrong apartment, finds photos "
+                    "of their own hallway, hears someone coming upstairs, and realizes the key was left deliberately. "
+                    "Rewrite from scratch in Brazilian Portuguese."
+                ),
+            },
+            {
+                "id": "family-photo-box-003",
+                "title": "A caixa escondida na reforma",
+                "priority_labels": ["shocking_discovery", "life_changing"],
+                "source_text": (
+                    "Original story seed: family renovation, hidden box behind furniture, old photo, unknown relative, "
+                    "safe deposit key, emotional reveal. Localize naturally for Brazilian audiences."
+                ),
+            },
+        ]
+        index = int(datetime.now(timezone.utc).strftime("%j")) % len(seeds)
+        return seeds[index]
+
+    def _topic_title(self, candidate: RedditStoryCandidate) -> str:
+        if candidate.source_kind == "original_story_seed":
+            return f"Reddit-style original story seed: {candidate.title}"
+        return f"Reddit story from r/{candidate.subreddit}: {candidate.title}"
 
 
 def is_reddit_story_topic(topic: TrendTopic) -> bool:

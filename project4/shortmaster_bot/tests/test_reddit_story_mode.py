@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from app.generators.script import ScriptGenerator
 from app.generators.video import VideoAssembler
@@ -18,6 +19,10 @@ def story_config(tmp_path: Path) -> dict:
     config = make_test_config(tmp_path)
     config["story_mode"] = {
         "enabled": True,
+        "official_api_enabled": True,
+        "client_id_env": "REDDIT_CLIENT_ID",
+        "client_secret_env": "REDDIT_CLIENT_SECRET",
+        "allow_original_story_fallback": True,
         "subreddits": ["AskReddit", "todayilearned", "LetsNotMeet", "NoStupidQuestions", "LifeProTips", "tifu", "interestingasfuck"],
         "min_upvotes": 1000,
         "min_comments": 50,
@@ -168,6 +173,85 @@ def story_script(verbatim: bool = False, disclaimer: bool = False, report_like: 
         },
     )
     return EngagementPromptOptimizer({}).apply(script, topic)
+
+
+class FakeRedditResponse:
+    def __init__(self, status_code: int, payload: Any):
+        self.status_code = status_code
+        self._payload = payload
+
+    def json(self) -> Any:
+        return self._payload
+
+    def raise_for_status(self) -> None:
+        if self.status_code >= 400:
+            raise RuntimeError(f"HTTP {self.status_code}")
+
+
+def test_story_source_uses_official_reddit_api_after_public_403(tmp_path: Path, monkeypatch) -> None:
+    config = story_config(tmp_path)
+    config["story_mode"]["subreddits"] = ["LetsNotMeet"]
+    monkeypatch.setenv("REDDIT_CLIENT_ID", "client-id")
+    monkeypatch.setenv("REDDIT_CLIENT_SECRET", "client-secret")
+    service = RedditStoryService(config)
+    calls: list[str] = []
+
+    def fake_post(url, **_kwargs):
+        calls.append(url)
+        return FakeRedditResponse(200, {"access_token": "official-token", "expires_in": 3600})
+
+    def fake_get(url, **_kwargs):
+        calls.append(url)
+        if url.startswith("https://www.reddit.com/r/"):
+            return FakeRedditResponse(403, {})
+        if url.startswith("https://oauth.reddit.com/r/"):
+            return FakeRedditResponse(
+                200,
+                {
+                    "data": {
+                        "children": [
+                            {
+                                "data": {
+                                    "id": "oauth1",
+                                    "title": "A creepy thing happened in my basement",
+                                    "selftext": source_text(),
+                                    "ups": 5000,
+                                    "num_comments": 700,
+                                    "upvote_ratio": 0.95,
+                                    "created_utc": 1_800_000_000,
+                                    "permalink": "/r/LetsNotMeet/comments/oauth1/test/",
+                                }
+                            }
+                        ]
+                    }
+                },
+            )
+        raise AssertionError(f"unexpected URL {url}")
+
+    service.session.post = fake_post
+    service.session.get = fake_get
+
+    candidates = service.fetch_candidates()
+
+    assert len(candidates) == 1
+    assert candidates[0].post_id == "oauth1"
+    assert any(url.startswith("https://oauth.reddit.com/r/") for url in calls)
+    assert service.last_source_failures[0]["reason"] == "HTTP 403"
+
+
+def test_story_source_uses_original_fallback_when_reddit_sources_are_empty(tmp_path: Path, monkeypatch) -> None:
+    service = RedditStoryService(story_config(tmp_path))
+    monkeypatch.setattr(service, "_fetch_subreddit_posts", lambda _subreddit: [])
+
+    topic = service.find_story()
+
+    assert topic is not None
+    report = topic.raw["story_source"]
+    assert report["source_platform"] == "ShortMaster"
+    assert report["source_kind"] == "original_story_seed"
+    assert report["source_url"].startswith("internal://shortmaster/original-story-seeds/")
+    assert report["engagement_threshold_met"] is None
+    assert "Reddit source fetch failed" in report["fallback_reason"]
 
 
 def test_story_engagement_optimizer_generates_three_and_selects_one(tmp_path: Path) -> None:

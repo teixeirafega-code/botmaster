@@ -68,6 +68,7 @@ def load_config(root_dir: Path | None = None) -> dict[str, Any]:
             "upload_window_end_hour": 22,
             "max_consecutive_upload_failures": 3,
             "max_upload_attempts_per_video": 3,
+            "generation_attempt_limit": 3,
             "validation_failure_window": 10,
             "validation_failure_min_events": 5,
             "max_validation_failure_rate": 0.5,
@@ -97,6 +98,10 @@ def load_config(root_dir: Path | None = None) -> dict[str, Any]:
         },
         "story_mode": {
             "enabled": False,
+            "official_api_enabled": True,
+            "client_id_env": "REDDIT_CLIENT_ID",
+            "client_secret_env": "REDDIT_CLIENT_SECRET",
+            "allow_original_story_fallback": True,
             "engagement_prompt": {
                 "enabled": True,
                 "variants_per_story": 3,
@@ -242,6 +247,10 @@ def load_config(root_dir: Path | None = None) -> dict[str, Any]:
         "UPLOAD_SLOTS_PER_DAY",
         int(config["scheduler"].get("upload_slots_per_day", 5)),
     )
+    config["scheduler"]["generation_attempt_limit"] = _env_int(
+        "GENERATION_ATTEMPT_LIMIT",
+        int(config["scheduler"].get("generation_attempt_limit", 3)),
+    )
 
     config.setdefault("storage", {})
     config["storage"]["base_dir"] = os.getenv(
@@ -327,6 +336,22 @@ def load_config(root_dir: Path | None = None) -> dict[str, Any]:
     config["story_mode"]["enabled"] = _env_bool(
         "REDDIT_STORY_MODE_ENABLED",
         bool(config["story_mode"].get("enabled", False)),
+    )
+    config["story_mode"]["official_api_enabled"] = _env_bool(
+        "REDDIT_OFFICIAL_API_ENABLED",
+        bool(config["story_mode"].get("official_api_enabled", True)),
+    )
+    config["story_mode"]["client_id_env"] = os.getenv(
+        "REDDIT_CLIENT_ID_ENV",
+        config["story_mode"].get("client_id_env", "REDDIT_CLIENT_ID"),
+    )
+    config["story_mode"]["client_secret_env"] = os.getenv(
+        "REDDIT_CLIENT_SECRET_ENV",
+        config["story_mode"].get("client_secret_env", "REDDIT_CLIENT_SECRET"),
+    )
+    config["story_mode"]["allow_original_story_fallback"] = _env_bool(
+        "REDDIT_ORIGINAL_FALLBACK_ENABLED",
+        bool(config["story_mode"].get("allow_original_story_fallback", True)),
     )
     config["story_mode"]["min_upvotes"] = _env_int(
         "REDDIT_STORY_MIN_UPVOTES",

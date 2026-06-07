@@ -18,6 +18,9 @@ def test_manual_workflow_defaults_to_paper_and_requires_explicit_real_upload() -
     assert "Validate real upload secrets" in text
     assert "Require real upload for manual real_upload runs" in text
     assert "manual real_upload did not upload a video" in text
+    assert 'GENERATION_ATTEMPT_LIMIT: "3"' in text
+    assert "REDDIT_OFFICIAL_API_ENABLED" in text
+    assert "REDDIT_ORIGINAL_FALLBACK_ENABLED" in text
 
 
 def test_workflow_summary_uses_heredoc_not_shell_backtick_command_substitution() -> None:

@@ -14,6 +14,7 @@ scheduler:
   upload_window_end_hour: 22
   max_consecutive_upload_failures: 3
   max_upload_attempts_per_video: 3
+  generation_attempt_limit: 3
   validation_failure_window: 10
   validation_failure_min_events: 5
   max_validation_failure_rate: 0.5
@@ -75,6 +76,10 @@ trends:
 
 story_mode:
   enabled: true
+  official_api_enabled: true
+  client_id_env: REDDIT_CLIENT_ID
+  client_secret_env: REDDIT_CLIENT_SECRET
+  allow_original_story_fallback: true
   engagement_prompt:
     enabled: true
     variants_per_story: 3

@@ -110,39 +110,85 @@ class ScheduledPublishingJob:
         return report
 
     def _generate_one(self) -> dict[str, Any]:
-        items = self.pipeline.db.list_for_processing(limit=1)
-        item = items[0] if items else self.pipeline.discover_and_queue()
-        if not item:
-            return {
-                "generation_attempted": False,
-                "status": "empty",
-                "reason": "No eligible unseen story was available",
-            }
+        max_attempts = int(self.config.get("scheduler", {}).get("generation_attempt_limit", 3))
+        attempts: list[dict[str, Any]] = []
+        existing_items = self.pipeline.db.list_for_processing(limit=max_attempts)
+        for item in existing_items:
+            result = self._process_generation_item(item)
+            attempts.append(result)
+            if result.get("upload_ready"):
+                return self._generation_summary(attempts, result)
+
+        for _ in range(max_attempts - len(attempts)):
+            item = self.pipeline.discover_and_queue()
+            if not item:
+                break
+            result = self._process_generation_item(item)
+            attempts.append(result)
+            if result.get("upload_ready"):
+                return self._generation_summary(attempts, result)
+
+        if attempts:
+            return self._generation_summary(
+                attempts,
+                attempts[-1],
+                reason="No generated item passed upload readiness gates",
+            )
+        return {
+            "generation_attempted": False,
+            "status": "empty",
+            "reason": "No eligible unseen story was available",
+            "attempts": [],
+        }
+
+    def _process_generation_item(self, item: dict[str, Any]) -> dict[str, Any]:
         if item.get("status") == QueueStatus.PENDING_APPROVAL:
             return {
                 "generation_attempted": False,
                 "status": "blocked",
                 "queue_id": item.get("id"),
                 "reason": "Manual approval is enabled for an autonomous scheduled job",
+                "upload_ready": False,
             }
 
         queue_id = int(item["id"])
         processed = self.pipeline.process_item(item, publish_after_generate=False)
+        approved_for_live_upload = bool(
+            int(processed.get("approved_for_live_upload") or 0) == 1
+        )
+        commercial_rights_verified = bool(
+            int(processed.get("background_commercial_rights_verified") or 0) == 1
+        )
+        upload_ready = bool(
+            processed.get("status") == QueueStatus.READY
+            and approved_for_live_upload
+            and processed.get("video_path")
+            and commercial_rights_verified
+        )
         return {
             "generation_attempted": True,
             "queue_id": queue_id,
             "status": processed.get("status"),
             "quality_score": processed.get("quality_score"),
-            "approved_for_live_upload": bool(
-                int(processed.get("approved_for_live_upload") or 0) == 1
-            ),
+            "approved_for_live_upload": approved_for_live_upload,
             "background_filename": processed.get("background_filename"),
-            "background_commercial_rights_verified": bool(
-                int(processed.get("background_commercial_rights_verified") or 0)
-                == 1
-            ),
+            "background_commercial_rights_verified": commercial_rights_verified,
             "upload_blocked_reason": processed.get("upload_blocked_reason"),
+            "upload_ready": upload_ready,
         }
+
+    def _generation_summary(
+        self,
+        attempts: list[dict[str, Any]],
+        selected: dict[str, Any],
+        reason: str = "",
+    ) -> dict[str, Any]:
+        summary = dict(selected)
+        summary["attempts"] = attempts
+        summary["attempt_count"] = len(attempts)
+        if reason and not summary.get("upload_ready"):
+            summary["reason"] = reason
+        return summary
 
     def _refresh_metrics(self, report: dict[str, Any]) -> None:
         report["metrics_refresh"]["attempted"] = True
