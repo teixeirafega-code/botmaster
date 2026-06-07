@@ -407,7 +407,17 @@ class ScriptGenerator:
 
     def _story_profile(self, source_text: str, category: str) -> dict[str, Any]:
         lower = source_text.lower()
-        if any(term in lower for term in ["mall encounter", "three nice young girls", "alternative store"]):
+        if any(
+            term in lower
+            for term in [
+                "mall encounter",
+                "three nice young girls",
+                "alternative store",
+                "shopping vazio",
+                "pede ajuda",
+                "ligacao descreve",
+            ]
+        ):
             return {
                 "title": "A mulher do shopping começou a descrever a gente",
                 "prompt": "Pessoal do Reddit: quando ajudar um estranho fez você se arrepender?",
@@ -551,7 +561,20 @@ class ScriptGenerator:
                 "visual_theme": "mistério dentro de uma casa com porão",
                 "description": "Um barulho tratado como defeito da casa termina com uma descoberta impossível de ignorar.",
             }
-        if any(term in lower for term in ["night shift", "security guard", "3am", "three am", "corridor", "warehouse"]):
+        if any(
+            term in lower
+            for term in [
+                "night shift",
+                "security guard",
+                "3am",
+                "three am",
+                "corridor",
+                "warehouse",
+                "turno de seguranca",
+                "madrugada",
+                "corredor fechado",
+            ]
+        ):
             return {
                 "title": "Os passos no corredor às três da manhã",
                 "prompt": "Pessoal do Reddit: o que mais assustou você trabalhando de madrugada?",
@@ -623,7 +646,20 @@ class ScriptGenerator:
                 "visual_theme": "desastre engraçado durante casamento",
                 "description": "Uma desculpa pequena provoca ambulância, microfone aberto e um bolo voando.",
             }
-        if category == "shocking_discovery" or any(term in lower for term in ["dna", "discovered", "found out", "hidden", "secret"]):
+        if category == "shocking_discovery" or any(
+            term in lower
+            for term in [
+                "dna",
+                "discovered",
+                "found out",
+                "hidden",
+                "secret",
+                "caixa escondida",
+                "foto antiga",
+                "parente desconhecido",
+                "revelacao emocional",
+            ]
+        ):
             return {
                 "title": "A foto escondida atrás do armário",
                 "prompt": "Pessoal do Reddit: qual descoberta mudou sua família para sempre?",
@@ -716,7 +752,10 @@ class ScriptGenerator:
         ]
 
     def _story_tags(self, category: str, subreddit: str, topic: TrendTopic) -> list[str]:
-        tags = ["historiasreddit", "relatos", "shortsbr", "reddit", subreddit.lower()]
+        subreddit_tag = {
+            "original-story-seed": "relatooriginal",
+        }.get(subreddit.lower(), subreddit.lower())
+        tags = ["historiasreddit", "relatos", "shortsbr", "reddit", subreddit_tag]
         labels = {
             "scary": "assustador",
             "unbelievable": "inacreditavel",

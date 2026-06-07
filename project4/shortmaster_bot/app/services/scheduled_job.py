@@ -214,11 +214,19 @@ class ScheduledPublishingJob:
         commercial_rights_verified = bool(
             int(processed.get("background_commercial_rights_verified") or 0) == 1
         )
+        safety_payload = self._json_object(processed.get("safety_json"))
         upload_ready = bool(
             processed.get("status") == QueueStatus.READY
             and approved_for_live_upload
             and processed.get("video_path")
             and commercial_rights_verified
+        )
+        diagnostics = self._attempt_diagnostics(
+            processed=processed,
+            safety_payload=safety_payload,
+            approved_for_live_upload=approved_for_live_upload,
+            commercial_rights_verified=commercial_rights_verified,
+            upload_ready=upload_ready,
         )
         return {
             "generation_attempted": True,
@@ -233,7 +241,205 @@ class ScheduledPublishingJob:
             "upload_ready": upload_ready,
             "video_rendered": bool(processed.get("video_path")),
             "validation_passed": bool(processed.get("status") == QueueStatus.READY and approved_for_live_upload),
+            **diagnostics,
         }
+
+    def _attempt_diagnostics(
+        self,
+        *,
+        processed: dict[str, Any],
+        safety_payload: dict[str, Any],
+        approved_for_live_upload: bool,
+        commercial_rights_verified: bool,
+        upload_ready: bool,
+    ) -> dict[str, Any]:
+        reason = str(processed.get("upload_blocked_reason") or processed.get("error") or "").strip()
+        status = str(processed.get("status") or "")
+        checks = safety_payload.get("checks") if isinstance(safety_payload.get("checks"), dict) else {}
+        quality_score = self._float_or_none(
+            processed.get("quality_score", safety_payload.get("quality_score"))
+        )
+        safety_score = self._float_or_none(safety_payload.get("safety_score"))
+        quality_threshold = float(
+            self.config.get("publishing", {}).get("min_upload_quality_score", 75)
+        )
+        safety_threshold = float(
+            self.config.get("publishing", {}).get("min_upload_safety_score", 90)
+        )
+        video_rendered = bool(processed.get("video_path"))
+        score_reasons = safety_payload.get("score_reasons")
+        if not isinstance(score_reasons, list):
+            score_reasons = []
+        language_evaluated = bool(checks.get("required_language")) or any(
+            "language" in str(item).lower() for item in score_reasons
+        )
+        pt_br_passed = None
+        if checks:
+            pt_br_passed = all(
+                str(checks.get(key) or "") == "pt-BR"
+                for key in [
+                    "script_language",
+                    "narration_language",
+                    "subtitle_language",
+                    "title_language",
+                    "description_language",
+                    "hashtag_language",
+                ]
+            ) and not checks.get("english_residue")
+        if "English text remains" in reason or "must be pt-BR" in reason:
+            pt_br_passed = False
+        elif language_evaluated and pt_br_passed is None:
+            pt_br_passed = True
+
+        cta_passed = None
+        if checks:
+            manipulative_hits = checks.get("manipulative_engagement_hits") or []
+            cta_passed = bool(
+                checks.get("engagement_prompt_count") == 1
+                and checks.get("engagement_prompt_near_end") is True
+                and not manipulative_hits
+            )
+        if "engagement" in reason.lower():
+            cta_passed = False
+
+        duplicate_passed = None
+        if "duplicate" in reason.lower() or "similar to previous" in reason.lower():
+            duplicate_passed = False
+        elif safety_payload:
+            duplicate_passed = True
+
+        quality_passed = None if quality_score is None else quality_score >= quality_threshold
+        safety_passed = None if safety_score is None else safety_score >= safety_threshold
+        validation_passed = bool(status == QueueStatus.READY and approved_for_live_upload)
+
+        gates = {
+            "story_selected": {"passed": True, "detail": "queue item was selected"},
+            "video_rendered": {
+                "passed": video_rendered,
+                "detail": f"video_path_present={video_rendered}",
+            },
+            "validation_passed": {
+                "passed": validation_passed,
+                "detail": f"status={status}; approved_for_live_upload={approved_for_live_upload}",
+            },
+            "queued_ready": {
+                "passed": upload_ready,
+                "detail": f"status={status}; upload_ready={upload_ready}",
+            },
+            "quality_score": {
+                "passed": quality_passed,
+                "score": quality_score,
+                "minimum": quality_threshold,
+            },
+            "safety_score": {
+                "passed": safety_passed,
+                "score": safety_score,
+                "minimum": safety_threshold,
+            },
+            "pt-BR": {
+                "passed": pt_br_passed,
+                "detail": self._language_detail(checks),
+            },
+            "CTA": {
+                "passed": cta_passed,
+                "detail": self._cta_detail(checks),
+            },
+            "duplicidade": {
+                "passed": duplicate_passed,
+                "detail": "local duplicate script check",
+            },
+            "direitos_comerciais": {
+                "passed": commercial_rights_verified,
+                "detail": f"background_commercial_rights_verified={commercial_rights_verified}",
+            },
+        }
+        failure_stage = self._failure_stage(
+            status=status,
+            reason=reason,
+            gates=gates,
+            video_rendered=video_rendered,
+        )
+        return {
+            "failure_stage": failure_stage,
+            "failure_reason": reason or ("ready for upload" if upload_ready else "not ready for upload"),
+            "quality_score": quality_score,
+            "safety_score": safety_score,
+            "attempt_gates": gates,
+            "content_safety_reasons": list(safety_payload.get("reasons") or []),
+        }
+
+    def _failure_stage(
+        self,
+        *,
+        status: str,
+        reason: str,
+        gates: dict[str, Any],
+        video_rendered: bool,
+    ) -> str:
+        lower_reason = reason.lower()
+        if status in {
+            QueueStatus.NEEDS_RESEARCH,
+            QueueStatus.NEEDS_FRESH_SOURCE,
+            QueueStatus.NEEDS_TRUSTED_SOURCE,
+        }:
+            return "research"
+        if "english text remains" in lower_reason or "must be pt-br" in lower_reason:
+            return "pt-BR"
+        if "engagement" in lower_reason:
+            return "CTA"
+        if "duplicate" in lower_reason or "similar to previous" in lower_reason:
+            return "duplicidade"
+        if gates["quality_score"]["passed"] is False:
+            return "quality_score"
+        if gates["safety_score"]["passed"] is False:
+            return "safety_score"
+        if not video_rendered:
+            return "video_rendered"
+        if gates["direitos_comerciais"]["passed"] is False:
+            return "direitos_comerciais"
+        if gates["validation_passed"]["passed"] is False:
+            return "validation_passed"
+        if gates["queued_ready"]["passed"] is False:
+            return "queued_ready"
+        return "none"
+
+    def _json_object(self, value: Any) -> dict[str, Any]:
+        if isinstance(value, dict):
+            return value
+        if not value:
+            return {}
+        try:
+            parsed = json.loads(str(value))
+        except (TypeError, ValueError):
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+
+    def _float_or_none(self, value: Any) -> float | None:
+        if value in (None, ""):
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _language_detail(self, checks: dict[str, Any]) -> str:
+        if not checks:
+            return "language gate not evaluated"
+        residue = checks.get("english_residue") or []
+        return (
+            f"script={checks.get('script_language')} narration={checks.get('narration_language')} "
+            f"subtitle={checks.get('subtitle_language')} title={checks.get('title_language')} "
+            f"english_residue_count={len(residue)}"
+        )
+
+    def _cta_detail(self, checks: dict[str, Any]) -> str:
+        if not checks:
+            return "CTA gate not evaluated"
+        return (
+            f"count={checks.get('engagement_prompt_count')} "
+            f"near_end={checks.get('engagement_prompt_near_end')} "
+            f"engagement_score={checks.get('engagement_score')}"
+        )
 
     def _generation_summary(
         self,

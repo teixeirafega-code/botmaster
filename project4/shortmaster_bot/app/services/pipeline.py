@@ -82,6 +82,7 @@ class ShortsMasterPipeline:
                     return story
             if topics:
                 LOGGER.info("All eligible Reddit story candidates were already seen")
+                return None
             else:
                 LOGGER.warning("Reddit story mode found no eligible story candidates")
                 return None

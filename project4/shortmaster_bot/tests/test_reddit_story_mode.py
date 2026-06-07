@@ -254,6 +254,59 @@ def test_story_source_uses_original_fallback_when_reddit_sources_are_empty(tmp_p
     assert "Reddit source fetch failed" in report["fallback_reason"]
 
 
+def test_original_fallback_provides_multiple_pt_br_seeds(tmp_path: Path, monkeypatch) -> None:
+    service = RedditStoryService(story_config(tmp_path))
+    monkeypatch.setattr(service, "_fetch_subreddit_posts", lambda _subreddit: [])
+
+    candidates = service.fetch_candidates()
+
+    assert len(candidates) >= 3
+    assert len({candidate.post_id for candidate in candidates}) == len(candidates)
+    assert all(candidate.source_kind == "original_story_seed" for candidate in candidates)
+    assert all("story seed" not in candidate.title.lower() for candidate in candidates)
+
+
+def test_original_fallback_generates_public_pt_br_script(tmp_path: Path, monkeypatch) -> None:
+    config = story_config(tmp_path)
+    service = RedditStoryService(config)
+    monkeypatch.setattr(service, "_fetch_subreddit_posts", lambda _subreddit: [])
+
+    topic = service.find_story()
+
+    assert topic is not None
+    assert "story seed" not in topic.title.lower()
+    script = ScriptGenerator(config).generate(topic, service.build_research_brief(topic))
+    decision = SafetyGuard(ShortsMasterDatabase(tmp_path / "bot.db"), config).evaluate_language(script)
+
+    assert decision["allowed"] is True
+    assert decision["script_language"] == "pt-BR"
+    assert decision["narration_language"] == "pt-BR"
+    assert decision["subtitle_language"] == "pt-BR"
+    assert decision["title_language"] == "pt-BR"
+    assert decision["english_residue"] == []
+
+
+def test_original_fallback_script_passes_story_safety_scores(tmp_path: Path, monkeypatch) -> None:
+    config = story_config(tmp_path)
+    service = RedditStoryService(config)
+    monkeypatch.setattr(service, "_fetch_subreddit_posts", lambda _subreddit: [])
+
+    topic = service.find_story()
+
+    assert topic is not None
+    script = ScriptGenerator(config).generate(topic, service.build_research_brief(topic))
+    decision = SafetyGuard(ShortsMasterDatabase(tmp_path / "bot.db"), config).evaluate_content(
+        1,
+        topic,
+        script,
+    )
+
+    assert decision["allowed"] is True
+    assert decision["quality_score"] >= 75
+    assert decision["safety_score"] >= 90
+    assert decision["checks"]["engagement_score"] >= 75
+
+
 def test_story_engagement_optimizer_generates_three_and_selects_one(tmp_path: Path) -> None:
     service = RedditStoryService(story_config(tmp_path))
     candidate = service._candidate_from_post(

@@ -548,9 +548,9 @@ class RedditStoryService:
         is_original_fallback = report.get("source_kind") == "original_story_seed"
         if is_original_fallback:
             facts = [
-                "ShortMaster selected an original story seed after live Reddit fetching failed.",
-                "The seed is owned by ShortMaster and is safe to rewrite for entertainment.",
-                "The public script must not claim the story is verified or sourced from a Reddit user.",
+                "O ShortMaster selecionou uma semente narrativa original depois que a busca ao vivo no Reddit falhou.",
+                "A semente e original do ShortMaster e pode ser reescrita para entretenimento.",
+                "O roteiro publico nao deve afirmar que a historia foi verificada ou veio de um usuario do Reddit.",
             ]
         else:
             facts = [
@@ -573,7 +573,7 @@ class RedditStoryService:
             "source": "ShortMaster original story seed" if is_original_fallback else "Reddit",
             "title": clean_text(str(report.get("source_title", topic.title))),
             "summary": (
-                "Original internal story seed selected because Reddit fetch failed; no Reddit user text is copied."
+                "Semente narrativa interna e original selecionada porque a busca no Reddit falhou; nenhum texto de usuario do Reddit e copiado."
                 if is_original_fallback
                 else "Auditable Reddit story source selected by engagement, comments, source subreddit, "
                 "and retention category. Raw Reddit text is not included in generated reports."
@@ -581,7 +581,7 @@ class RedditStoryService:
             "url": clean_text(str(report.get("source_url", topic.url))),
             "source_trust_score": round(trust_score, 1),
             "source_trust_reason": (
-                "Original owned story seed; safe for entertainment but not a factual claim."
+                "Semente narrativa original propria; segura para entretenimento, mas nao e uma alegacao factual."
                 if is_original_fallback
                 else "Reddit anecdote is auditable but unverified; script requires explicit story framing."
             ),
@@ -612,7 +612,7 @@ class RedditStoryService:
             locations=[],
             uncertainty_notes=[
                 (
-                    "Fallback story seed is original entertainment material; narration must not present it as verified fact."
+                    "A semente narrativa fallback e material original de entretenimento; a narracao nao deve apresentar isso como fato verificado."
                     if is_original_fallback
                     else "Reddit anecdotes are not independently verified; narration must not present them as fact."
                 ),
@@ -733,7 +733,7 @@ class RedditStoryService:
         )
 
     def _fallback_candidates(self) -> list[RedditStoryCandidate]:
-        seed = self._fallback_story_seed()
+        seeds = self._fallback_story_seeds()
         now = time.time()
         failure_summary = "; ".join(
             f"{item['subreddit']}:{item['source_type']}:{item['reason']}"
@@ -743,35 +743,45 @@ class RedditStoryService:
             "Live Reddit source fetch failed or returned no eligible stories"
             + (f" ({failure_summary})" if failure_summary else "")
         )
-        candidate = RedditStoryCandidate(
-            subreddit="original-story-seed",
-            post_id=seed["id"],
-            title=seed["title"],
-            source_text=seed["source_text"],
-            source_url=f"internal://shortmaster/original-story-seeds/{seed['id']}",
-            source_kind="original_story_seed",
-            ups=0,
-            comments=0,
-            upvote_ratio=1.0,
-            created_utc=now,
-            priority_labels=seed["priority_labels"],
-            selection_score=120_000.0,
-            source_platform="ShortMaster",
-            fallback_reason=reason,
-        )
+        day_index = int(datetime.now(timezone.utc).strftime("%j")) % len(seeds)
+        ordered = [*seeds[day_index:], *seeds[:day_index]]
+        candidates = [
+            RedditStoryCandidate(
+                subreddit="original-story-seed",
+                post_id=seed["id"],
+                title=seed["title"],
+                source_text=seed["source_text"],
+                source_url=f"internal://shortmaster/original-story-seeds/{seed['id']}",
+                source_kind="original_story_seed",
+                ups=0,
+                comments=0,
+                upvote_ratio=1.0,
+                created_utc=now,
+                priority_labels=seed["priority_labels"],
+                selection_score=120_000.0 - index,
+                source_platform="ShortMaster",
+                fallback_reason=reason,
+            )
+            for index, seed in enumerate(ordered)
+        ]
         LOGGER.warning("Using original Reddit-style story fallback: %s", reason)
-        return [candidate]
+        return candidates
 
     def _fallback_story_seed(self) -> dict[str, Any]:
+        seeds = self._fallback_story_seeds()
+        index = int(datetime.now(timezone.utc).strftime("%j")) % len(seeds)
+        return seeds[index]
+
+    def _fallback_story_seeds(self) -> list[dict[str, Any]]:
         seeds = [
             {
                 "id": "night-shift-mall-001",
                 "title": "A ligação estranha no shopping vazio",
                 "priority_labels": ["scary", "mystery"],
                 "source_text": (
-                    "Original story seed: mall encounter, overnight security shift, stranger asks for help, "
-                    "phone call describes the narrator, footsteps in a closed corridor, final discovery on camera. "
-                    "Rewrite in Brazilian Portuguese with suspense; do not claim it is verified."
+                    "Semente narrativa original: encontro em shopping vazio, turno de seguranca de madrugada, "
+                    "uma pessoa estranha pede ajuda, uma ligacao descreve o narrador, passos surgem num corredor fechado "
+                    "e a camera revela o ultimo detalhe. Reescrever em portugues brasileiro com suspense."
                 ),
             },
             {
@@ -779,9 +789,9 @@ class RedditStoryService:
                 "title": "A chave que abriu o apartamento errado",
                 "priority_labels": ["mystery", "unbelievable"],
                 "source_text": (
-                    "Original story seed: tired renter receives a spare key, opens the wrong apartment, finds photos "
-                    "of their own hallway, hears someone coming upstairs, and realizes the key was left deliberately. "
-                    "Rewrite from scratch in Brazilian Portuguese."
+                    "Semente narrativa original: morador cansado recebe uma chave reserva, abre o apartamento errado, "
+                    "encontra fotos do proprio corredor, ouve alguem subindo a escada e percebe que a chave foi deixada de proposito. "
+                    "Reescrever do zero em portugues brasileiro."
                 ),
             },
             {
@@ -789,18 +799,17 @@ class RedditStoryService:
                 "title": "A caixa escondida na reforma",
                 "priority_labels": ["shocking_discovery", "life_changing"],
                 "source_text": (
-                    "Original story seed: family renovation, hidden box behind furniture, old photo, unknown relative, "
-                    "safe deposit key, emotional reveal. Localize naturally for Brazilian audiences."
+                    "Semente narrativa original: reforma em familia, caixa escondida atras de um movel, foto antiga, "
+                    "parente desconhecido, chave de cofre e revelacao emocional. Localizar naturalmente para o publico brasileiro."
                 ),
             },
         ]
-        index = int(datetime.now(timezone.utc).strftime("%j")) % len(seeds)
-        return seeds[index]
+        return seeds
 
     def _topic_title(self, candidate: RedditStoryCandidate) -> str:
         if candidate.source_kind == "original_story_seed":
-            return f"Reddit-style original story seed: {candidate.title}"
-        return f"Reddit story from r/{candidate.subreddit}: {candidate.title}"
+            return f"Relato original estilo Reddit: {candidate.title}"
+        return f"Relato do Reddit em r/{candidate.subreddit}: {candidate.title}"
 
 
 def is_reddit_story_topic(topic: TrendTopic) -> bool:

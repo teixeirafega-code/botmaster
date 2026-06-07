@@ -72,8 +72,61 @@ def test_scheduled_job_retries_generation_until_upload_ready_limit(tmp_path: Pat
     assert result["workflow_stages"]["story_selected"]["passed"] is True
     assert result["workflow_stages"]["queued_ready"]["passed"] is False
     assert result["workflow_stages"]["upload_attempted"]["passed"] is False
+    for attempt in result["generation_result"]["attempts"]:
+        assert attempt["failure_stage"]
+        assert attempt["failure_reason"]
+        assert "attempt_gates" in attempt
     assert result["upload_result"]["status"] == "generation_failed"
     assert calls == {"discover": 3, "process": 3, "publish": 0}
+
+
+def test_scheduled_job_reports_pt_br_failure_per_attempt(tmp_path: Path, monkeypatch) -> None:
+    config = live_config(tmp_path)
+    config.setdefault("scheduler", {})["generation_attempt_limit"] = 1
+    pipeline = ShortsMasterPipeline(config)
+
+    def fake_discover(**_kwargs):
+        return {"id": 1, "status": "approved", "title": "Tema"}
+
+    def fake_process(item, publish_after_generate=False):
+        assert publish_after_generate is False
+        return {
+            **item,
+            "status": QueueStatus.SAFETY_BLOCKED,
+            "approved_for_live_upload": 0,
+            "upload_blocked_reason": "English text remains in final output: story",
+            "safety_json": json.dumps(
+                {
+                    "quality_score": 0.0,
+                    "safety_score": 0.0,
+                    "checks": {
+                        "required_language": "pt-BR",
+                        "script_language": "pt-BR",
+                        "narration_language": "pt-BR",
+                        "subtitle_language": "pt-BR",
+                        "title_language": "pt-BR",
+                        "description_language": "pt-BR",
+                        "hashtag_language": "pt-BR",
+                        "english_residue": [{"field": "hashtags", "term": "story"}],
+                    },
+                    "reasons": ["English text remains in final output: story"],
+                },
+                ensure_ascii=True,
+            ),
+        }
+
+    monkeypatch.setattr(pipeline, "discover_and_queue", fake_discover)
+    monkeypatch.setattr(pipeline, "process_item", fake_process)
+    pipeline.refresh_metrics = lambda: 0
+
+    result = ScheduledPublishingJob(pipeline, config).run(job_id="pt-br-failure")
+    attempt = result["generation_result"]["attempts"][0]
+
+    assert result["status"] == "generation_failed"
+    assert attempt["failure_stage"] == "pt-BR"
+    assert attempt["failure_reason"] == "English text remains in final output: story"
+    assert attempt["attempt_gates"]["pt-BR"]["passed"] is False
+    assert result["workflow_stages"]["upload_attempted"]["passed"] is False
 
 
 def test_real_upload_job_generates_ready_item_then_uploads_private_video(tmp_path: Path) -> None:
