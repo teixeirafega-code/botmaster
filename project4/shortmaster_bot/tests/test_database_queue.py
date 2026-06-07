@@ -64,3 +64,38 @@ def test_background_filename_is_stored_in_upload_history(tmp_path: Path) -> None
     assert updated["background_source_url"] == "https://example.com/cleaning-loop"
     assert updated["background_commercial_rights_verified"] == 1
     assert db.background_library_performance()[0]["filename"] == "cleaning-loop.mp4"
+
+
+def test_comments_oriented_engagement_performance_is_tracked(tmp_path: Path) -> None:
+    db = ShortsMasterDatabase(tmp_path / "bot.db")
+    topic = TrendTopic(
+        source="reddit_story",
+        title="Relato com pergunta de opinião",
+        score=90,
+        niche="reddit_story",
+    )
+    item = db.enqueue_topic(topic, QueueStatus.APPROVED)
+    queue_id = int(item["id"])
+    db.update_queue_item(
+        queue_id,
+        engagement_prompt="Você teria entrado ou chamado a polícia?",
+        engagement_prompt_type="opinion",
+        engagement_score=94.0,
+        engagement_prompt_variants_json="[]",
+    )
+    db.record_metrics(
+        queue_id,
+        "youtube-test-id",
+        niche="reddit_story",
+        views=1000,
+        likes=80,
+        comments=25,
+    )
+
+    performance = db.engagement_prompt_performance()
+
+    assert performance[0]["prompt_type"] == "opinion"
+    assert performance[0]["avg_comments"] == 25.0
+    assert performance[0]["avg_comment_rate"] == 0.025
+    assert performance[0]["shares_available"] is False
+    assert performance[0]["watch_time_available"] is False

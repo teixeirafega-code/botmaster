@@ -9,6 +9,7 @@ from app.models import ContentScript, QueueStatus
 from app.scheduler import ShortsMasterScheduler
 from app.services.config import ROOT_DIR, load_config, resolve_storage_path
 from app.services.pipeline import ShortsMasterPipeline
+from app.services.scheduled_job import ScheduledPublishingJob
 from app.services.validation import EndToEndValidator
 from app.services.youtube_publish_scheduler import YouTubePublishScheduler
 from app.utils.logger import configure_logging
@@ -22,8 +23,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--config-root", type=Path, default=ROOT_DIR)
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sub.add_parser("run", help="Run 24/7 scheduler")
+    sub.add_parser("run", help="Run legacy local scheduler")
     sub.add_parser("once", help="Run one discovery/processing cycle")
+    scheduled_parser = sub.add_parser(
+        "scheduled-job",
+        help="Generate and publish at most one video, write reports, then exit",
+    )
+    scheduled_parser.add_argument("--job-id", default="")
     sub.add_parser("collect", help="Collect trends and queue the best unseen topic")
 
     queue_parser = sub.add_parser("queue", help="List queued content")
@@ -86,6 +92,11 @@ def main() -> None:
         ShortsMasterScheduler(pipeline, config).start()
     elif args.command == "once":
         print_json(pipeline.run_cycle())
+    elif args.command == "scheduled-job":
+        result = ScheduledPublishingJob(pipeline, config).run(job_id=args.job_id)
+        print_json(result)
+        if result.get("status") in {"failure", "paused", "validation_failed"}:
+            raise SystemExit(2)
     elif args.command == "collect":
         print_json(pipeline.discover_and_queue())
     elif args.command == "queue":

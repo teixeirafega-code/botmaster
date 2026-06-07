@@ -12,6 +12,7 @@ from typing import Any
 from app.models import ContentScript, ResearchBrief, TrendTopic
 from app.services.config import resolve_path, resolve_storage_path
 from app.services.database import ShortsMasterDatabase
+from app.services.engagement import analyze_engagement_prompt
 from app.services.language import LanguageGuard
 from app.services.narrative_style import analyze_reddit_narrative_style
 from app.services.reddit_story import is_reddit_story_topic
@@ -83,6 +84,37 @@ class SafetyGuard:
         elif is_reddit_story_topic(topic):
             score_reasons.append("passed Reddit story originality and natural narration checks")
         warnings.extend(story_warnings)
+
+        engagement = (
+            analyze_engagement_prompt(script)
+            if is_reddit_story_topic(topic)
+            else {
+                "allowed": True,
+                "engagement_score": 100.0,
+                "engagement_prompt": "",
+                "engagement_prompt_type": "",
+                "engagement_prompt_count": 0,
+                "engagement_prompt_near_end": True,
+                "engagement_prompt_variants": [],
+                "comments_oriented": False,
+                "manipulative_engagement_hits": [],
+                "findings": [],
+            }
+        )
+        min_engagement = float(self.safety_config.get("min_engagement_score", 75))
+        if is_reddit_story_topic(topic) and not engagement["allowed"]:
+            reasons.extend(engagement["findings"])
+            score -= 35
+            score_reasons.append("major penalty: engagement prompt policy failed")
+        elif is_reddit_story_topic(topic) and engagement["engagement_score"] < min_engagement:
+            reasons.append(
+                f"engagement_score {engagement['engagement_score']:.1f} "
+                f"is below minimum {min_engagement:.1f}"
+            )
+            score -= 20
+            score_reasons.append("major penalty: weak story-connected engagement prompt")
+        elif is_reddit_story_topic(topic):
+            score_reasons.append("passed single natural engagement prompt gate")
 
         generic_reasons = self._generic_script_reasons(script)
         if generic_reasons:
@@ -169,6 +201,14 @@ class SafetyGuard:
                 "visual_interest_score": retention["visual_interest_score"],
                 "narrative_naturalness_score": narrative_style["narrative_naturalness_score"],
                 "disclaimer_leakage_score": narrative_style["disclaimer_leakage_score"],
+                "engagement_score": engagement["engagement_score"],
+                "engagement_prompt": engagement["engagement_prompt"],
+                "engagement_prompt_type": engagement["engagement_prompt_type"],
+                "engagement_prompt_count": engagement["engagement_prompt_count"],
+                "engagement_prompt_near_end": engagement["engagement_prompt_near_end"],
+                "engagement_prompt_variants": engagement["engagement_prompt_variants"],
+                "comments_oriented_cta": engagement["comments_oriented"],
+                "manipulative_engagement_hits": engagement["manipulative_engagement_hits"],
                 "retention_findings": retention["findings"],
                 "required_language": language_decision["required_language"],
                 "script_language": language_decision["script_language"],
@@ -339,6 +379,27 @@ class SafetyGuard:
             )
         else:
             self._add_check(checks, "language_validation_available", False, "script missing; cannot validate pt-BR output")
+
+        if topic and is_reddit_story_topic(topic) and language_script:
+            engagement = analyze_engagement_prompt(language_script)
+            min_engagement = float(self.safety_config.get("min_engagement_score", 75))
+            engagement_ok = bool(
+                engagement["allowed"]
+                and engagement["engagement_score"] >= min_engagement
+            )
+            self._add_check(
+                checks,
+                "reddit_engagement_prompt_policy",
+                engagement_ok,
+                (
+                    f"count={engagement['engagement_prompt_count']}; "
+                    f"near_end={engagement['engagement_prompt_near_end']}; "
+                    f"score={engagement['engagement_score']:.1f}; "
+                    f"minimum={min_engagement:.1f}; "
+                    f"manipulative_hits={engagement['manipulative_engagement_hits']}; "
+                    f"findings={engagement['findings']}"
+                ),
+            )
 
         research_status = self._research_status(queue_item)
         trust_score = float(research_status.get("trust_score", 0.0))

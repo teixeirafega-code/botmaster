@@ -97,6 +97,12 @@ def load_config(root_dir: Path | None = None) -> dict[str, Any]:
         },
         "story_mode": {
             "enabled": False,
+            "engagement_prompt": {
+                "enabled": True,
+                "variants_per_story": 3,
+                "placement": "ending",
+                "optimize_for": "comments_and_retention",
+            },
             "user_agent": "ShortsMasterBot/1.0 reddit story shorts mode",
             "subreddits": [
                 "AskReddit",
@@ -193,6 +199,7 @@ def load_config(root_dir: Path | None = None) -> dict[str, Any]:
             "min_retention_score": 72,
             "min_visual_interest_score": 70,
             "min_narrative_naturalness_score": 75,
+            "min_engagement_score": 75,
             "source_copy_ngram_words": 8,
         },
         "monitoring": {
@@ -432,6 +439,8 @@ def load_config(root_dir: Path | None = None) -> dict[str, Any]:
             raise ConfigError("Production min_upload_quality_score cannot be lower than 75")
         if int(config["publishing"]["min_upload_safety_score"]) < 90:
             raise ConfigError("Production min_upload_safety_score cannot be lower than 90")
+        if str(config["publishing"].get("privacy_status", "")).lower() != "private":
+            raise ConfigError("Production uploads must use YOUTUBE_PRIVACY_STATUS=private")
 
     config.setdefault("safety", {})
     config["safety"]["min_scene_count"] = _env_int(
@@ -449,6 +458,10 @@ def load_config(root_dir: Path | None = None) -> dict[str, Any]:
     config["safety"]["min_visual_interest_score"] = _env_int(
         "MIN_VISUAL_INTEREST_SCORE",
         int(config["safety"].get("min_visual_interest_score", 70)),
+    )
+    config["safety"]["min_engagement_score"] = _env_int(
+        "MIN_ENGAGEMENT_SCORE",
+        int(config["safety"].get("min_engagement_score", 75)),
     )
     config.setdefault("monitoring", {})
     config["monitoring"].setdefault("telegram", {})

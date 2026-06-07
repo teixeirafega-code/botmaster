@@ -63,6 +63,10 @@ class ShortsMasterDatabase:
                     background_source_url TEXT,
                     background_license_type TEXT,
                     background_commercial_rights_verified INTEGER NOT NULL DEFAULT 0,
+                    engagement_prompt TEXT,
+                    engagement_prompt_type TEXT,
+                    engagement_score REAL,
+                    engagement_prompt_variants_json TEXT,
                     quality_score REAL,
                     safety_json TEXT,
                     upload_blocked_reason TEXT,
@@ -163,6 +167,10 @@ class ShortsMasterDatabase:
             "background_source_url": "TEXT",
             "background_license_type": "TEXT",
             "background_commercial_rights_verified": "INTEGER NOT NULL DEFAULT 0",
+            "engagement_prompt": "TEXT",
+            "engagement_prompt_type": "TEXT",
+            "engagement_score": "REAL",
+            "engagement_prompt_variants_json": "TEXT",
             "approved_for_live_upload": "INTEGER NOT NULL DEFAULT 0",
             "live_approved_at": "TEXT",
             "upload_attempt_count": "INTEGER NOT NULL DEFAULT 0",
@@ -669,6 +677,78 @@ class ShortsMasterDatabase:
                     "avg_views": round(float(row["avg_views"] or 0.0), 1),
                     "avg_likes": round(float(row["avg_likes"] or 0.0), 1),
                     "avg_comments": round(float(row["avg_comments"] or 0.0), 1),
+                }
+                for row in rows
+            ]
+
+    def engagement_prompt_performance(self) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT
+                    COALESCE(cq.engagement_prompt_type, 'unknown') AS prompt_type,
+                    COALESCE(cq.engagement_prompt, '') AS prompt,
+                    COUNT(*) AS video_count,
+                    AVG(COALESCE(cq.engagement_score, 0)) AS avg_engagement_score,
+                    AVG(CASE WHEN m.queue_id IS NOT NULL THEN m.views END) AS avg_views,
+                    AVG(CASE WHEN m.queue_id IS NOT NULL THEN m.likes END) AS avg_likes,
+                    AVG(CASE WHEN m.queue_id IS NOT NULL THEN m.comments END) AS avg_comments,
+                    AVG(
+                        CASE
+                            WHEN m.queue_id IS NOT NULL AND m.views > 0
+                            THEN CAST(m.comments AS REAL) / m.views
+                        END
+                    ) AS avg_comment_rate,
+                    AVG(
+                        CASE
+                            WHEN m.queue_id IS NOT NULL AND m.views > 0
+                            THEN CAST(m.likes + m.comments AS REAL) / m.views
+                        END
+                    ) AS avg_known_interaction_rate,
+                    SUM(CASE WHEN m.queue_id IS NOT NULL THEN 1 ELSE 0 END) AS metric_video_count
+                FROM content_queue cq
+                LEFT JOIN (
+                    SELECT queue_id, MAX(fetched_at) AS latest_fetched_at
+                    FROM metrics
+                    GROUP BY queue_id
+                ) latest ON latest.queue_id = cq.id
+                LEFT JOIN metrics m
+                    ON m.queue_id = latest.queue_id
+                    AND m.fetched_at = latest.latest_fetched_at
+                WHERE cq.engagement_prompt IS NOT NULL
+                  AND cq.engagement_prompt != ''
+                GROUP BY cq.engagement_prompt_type, cq.engagement_prompt
+                ORDER BY avg_comment_rate DESC, avg_engagement_score DESC, video_count DESC
+                """
+            ).fetchall()
+            return [
+                {
+                    "prompt_type": str(row["prompt_type"]),
+                    "prompt": str(row["prompt"]),
+                    "video_count": int(row["video_count"]),
+                    "avg_engagement_score": round(
+                        float(row["avg_engagement_score"] or 0.0), 1
+                    ),
+                    "avg_views": round(float(row["avg_views"]), 1)
+                    if row["avg_views"] is not None
+                    else None,
+                    "avg_likes": round(float(row["avg_likes"]), 1)
+                    if row["avg_likes"] is not None
+                    else None,
+                    "avg_comments": round(float(row["avg_comments"]), 1)
+                    if row["avg_comments"] is not None
+                    else None,
+                    "avg_comment_rate": round(float(row["avg_comment_rate"]), 5)
+                    if row["avg_comment_rate"] is not None
+                    else None,
+                    "avg_known_interaction_rate": round(
+                        float(row["avg_known_interaction_rate"]), 5
+                    )
+                    if row["avg_known_interaction_rate"] is not None
+                    else None,
+                    "youtube_stats_available": int(row["metric_video_count"] or 0) > 0,
+                    "shares_available": False,
+                    "watch_time_available": False,
                 }
                 for row in rows
             ]

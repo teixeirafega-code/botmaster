@@ -86,6 +86,7 @@ def make_test_config(tmp_path: Path) -> dict:
             "min_retention_score": 72,
             "min_visual_interest_score": 70,
             "min_narrative_naturalness_score": 75,
+            "min_engagement_score": 75,
             "script_similarity_block_threshold": 0.92,
             "performance_guard": {
                 "enabled": True,

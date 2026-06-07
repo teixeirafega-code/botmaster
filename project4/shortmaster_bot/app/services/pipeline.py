@@ -166,6 +166,14 @@ class ShortsMasterPipeline:
                 background_commercial_rights_verified=int(
                     self.video.last_background_commercial_rights_verified
                 ),
+                engagement_prompt=script.engagement_prompt or None,
+                engagement_prompt_type=script.engagement_prompt_type or None,
+                engagement_score=float(script.engagement_score or 0.0),
+                engagement_prompt_variants_json=json.dumps(
+                    script.engagement_prompt_variants,
+                    ensure_ascii=True,
+                    sort_keys=True,
+                ),
             )
             if self.video.last_background_mode == "custom_background_library":
                 self.background_library.write_report()

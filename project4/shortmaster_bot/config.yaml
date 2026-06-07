@@ -75,6 +75,11 @@ trends:
 
 story_mode:
   enabled: true
+  engagement_prompt:
+    enabled: true
+    variants_per_story: 3
+    placement: ending
+    optimize_for: comments_and_retention
   user_agent: ShortsMasterBot/1.0 reddit story shorts mode
   subreddits:
     - AskReddit
@@ -260,6 +265,7 @@ safety:
   min_retention_score: 72
   min_visual_interest_score: 70
   min_narrative_naturalness_score: 75
+  min_engagement_score: 75
   source_copy_ngram_words: 8
   script_similarity_block_threshold: 0.92
   spam_terms:

@@ -8,6 +8,7 @@ from typing import Any
 import requests
 
 from app.models import ContentScript, ResearchBrief, TrendTopic
+from app.services.engagement import EngagementPromptOptimizer
 from app.services.narrative_style import analyze_reddit_narrative_style
 from app.services.reddit_story import is_reddit_story_topic
 from app.utils.text import clamp_words, clean_text, extract_json_object, split_sentences
@@ -27,6 +28,7 @@ class ScriptGenerator:
         language_config = config.get("language", {})
         self.language = str(language_config.get("default") or language_config.get("required") or "pt-BR")
         self.paper_mode = bool(config.get("app", {}).get("paper_mode", True))
+        self.engagement = EngagementPromptOptimizer(config)
         self.last_provider = "unknown"
         self.last_warnings: list[str] = []
 
@@ -37,16 +39,21 @@ class ScriptGenerator:
             try:
                 script = self._generate_with_ollama(topic, research)
                 self.last_provider = "ollama"
-                return script
+                return self._finalize_script(script, topic)
             except Exception as exc:
                 warning = f"Ollama unavailable; used local template fallback: {exc}"
                 self.last_warnings.append(warning)
                 LOGGER.warning(warning)
         if story_mode:
             self.last_provider = "template_reddit_story"
-            return self._generate_story_locally(topic, research)
+            return self._finalize_script(self._generate_story_locally(topic, research), topic)
         self.last_provider = "template_research" if research else "template"
-        return self._generate_locally(topic, research)
+        return self._finalize_script(self._generate_locally(topic, research), topic)
+
+    def _finalize_script(self, script: ContentScript, topic: TrendTopic) -> ContentScript:
+        if is_reddit_story_topic(topic):
+            return self.engagement.apply(script, topic)
+        return script
 
     def _generate_with_ollama(self, topic: TrendTopic, research: ResearchBrief | None) -> ContentScript:
         ollama_config = self.script_config.get("ollama", {})
@@ -173,6 +180,10 @@ class ScriptGenerator:
                     "opening": "Narration must start with a Reddit-style question, such as 'Pessoal do Reddit: qual foi...?'",
                     "story_voice": "Immediately after the opening question, narrate in first person or close third person.",
                     "subtitles": "Subtitles will always be burned into the video; write short spoken sentences.",
+                    "engagement_prompt": (
+                        "Do not write a call to action. The system will generate three safe, "
+                        "story-specific variants and append exactly one winner near the end."
+                    ),
                     "background_video": "user-approved satisfying MP4 from the local background library only",
                     "structure": [
                         "Hook",
@@ -192,6 +203,7 @@ class ScriptGenerator:
                         "labeled beats such as 'curiosidade:', 'aqui vem a revelação:', or 'final rápido:'",
                         "academic or report-like wording",
                         "spammy clickbait",
+                        "engagement bait, emotional blackmail, bad-luck threats, or fake percentage challenges",
                         "copyrighted clips, music, lyrics, logos, or real-person likenesses",
                     ],
                     "format": {

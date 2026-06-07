@@ -53,6 +53,10 @@ class ContentScript:
     tags: list[str]
     description: str
     niche: str
+    engagement_prompt: str = ""
+    engagement_prompt_type: str = ""
+    engagement_score: float = 0.0
+    engagement_prompt_variants: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -63,6 +67,12 @@ class ContentScript:
             "tags": self.tags,
             "description": self.description,
             "niche": self.niche,
+            "engagement_prompt": self.engagement_prompt,
+            "engagement_prompt_type": self.engagement_prompt_type,
+            "engagement_score": round(float(self.engagement_score), 1),
+            "engagement_prompt_variants": [
+                dict(item) for item in self.engagement_prompt_variants
+            ],
         }
 
     @classmethod
@@ -75,6 +85,12 @@ class ContentScript:
             tags=[str(tag) for tag in data["tags"]],
             description=str(data["description"]),
             niche=str(data["niche"]),
+            engagement_prompt=str(data.get("engagement_prompt", "")),
+            engagement_prompt_type=str(data.get("engagement_prompt_type", "")),
+            engagement_score=float(data.get("engagement_score", 0.0) or 0.0),
+            engagement_prompt_variants=[
+                dict(item) for item in data.get("engagement_prompt_variants", [])
+            ],
         )
 
 

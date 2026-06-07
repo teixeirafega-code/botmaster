@@ -14,6 +14,7 @@ from PIL import Image
 
 from app.models import ContentScript, QueueStatus, ResearchBrief, TrendTopic, utc_now_iso
 from app.services.config import resolve_storage_path
+from app.services.engagement import analyze_engagement_prompt
 from app.services.language import LanguageGuard
 from app.services.narrative_style import analyze_reddit_narrative_style
 from app.services.pipeline import ShortsMasterPipeline
@@ -166,6 +167,14 @@ class EndToEndValidator:
             background_commercial_rights_verified=int(
                 self.pipeline.video.last_background_commercial_rights_verified
             ),
+            engagement_prompt=script.engagement_prompt or None,
+            engagement_prompt_type=script.engagement_prompt_type or None,
+            engagement_score=float(script.engagement_score or 0.0),
+            engagement_prompt_variants_json=json.dumps(
+                script.engagement_prompt_variants,
+                ensure_ascii=True,
+                sort_keys=True,
+            ),
             quality_score=float(quality_analysis["final_quality_score"]),
             safety_json=json.dumps(
                 {"safety": content_decision, "quality": quality_analysis},
@@ -249,6 +258,7 @@ class EndToEndValidator:
         metadata["artifacts"] = artifact_paths
         metadata["artifacts"].update(self._write_category_performance_report())
         metadata["artifacts"].update(self._write_background_library_report())
+        metadata["artifacts"].update(self._write_engagement_performance_report())
 
         metadata_path = self.artifact_dir / "metadata.json"
         report_path = self.artifact_dir / "validation_report.json"
@@ -401,6 +411,22 @@ class EndToEndValidator:
                 "report_phrase_hits": [],
             }
         )
+        engagement = (
+            analyze_engagement_prompt(script)
+            if is_reddit_story_topic(topic)
+            else {
+                "allowed": True,
+                "engagement_score": 100.0,
+                "engagement_prompt": "",
+                "engagement_prompt_type": "",
+                "engagement_prompt_count": 0,
+                "engagement_prompt_near_end": True,
+                "engagement_prompt_variants": [],
+                "comments_oriented": False,
+                "manipulative_engagement_hits": [],
+                "findings": [],
+            }
+        )
         specificity = self._specificity_analysis(script, topic, research)
         hook = self._hook_analysis(script, topic)
         curiosity = self._curiosity_analysis(script)
@@ -430,8 +456,9 @@ class EndToEndValidator:
             specificity["score"] * 0.11
             + hook["score"] * 0.13
             + curiosity["score"] * 0.11
-            + storytelling["score"] * 0.13
-            + retention["score"] * 0.14
+            + storytelling["score"] * 0.11
+            + retention["score"] * 0.10
+            + engagement["engagement_score"] * 0.06
             + visual_interest["score"] * 0.13
             + (
                 narrative_style["narrative_naturalness_score"]
@@ -453,6 +480,7 @@ class EndToEndValidator:
         min_retention = float(config.get("safety", {}).get("min_retention_score", 72))
         min_visual = float(config.get("safety", {}).get("min_visual_interest_score", 70))
         min_naturalness = float(config.get("safety", {}).get("min_narrative_naturalness_score", 75))
+        min_engagement = float(config.get("safety", {}).get("min_engagement_score", 75))
         blocking_failures: list[str] = []
         if hook["score"] < min_hook:
             blocking_failures.append(f"hook_score {hook['score']:.1f} below minimum {min_hook:.1f}")
@@ -482,6 +510,18 @@ class EndToEndValidator:
                 f"below minimum {min_naturalness:.1f}"
             )
             final_quality = min(final_quality, 69.0)
+        if is_reddit_story_topic(topic) and not engagement["allowed"]:
+            blocking_failures.extend(engagement["findings"])
+            final_quality = min(final_quality, 69.0)
+        elif (
+            is_reddit_story_topic(topic)
+            and engagement["engagement_score"] < min_engagement
+        ):
+            blocking_failures.append(
+                f"engagement_score {engagement['engagement_score']:.1f} "
+                f"below minimum {min_engagement:.1f}"
+            )
+            final_quality = min(final_quality, 69.0)
         legacy_overall = round(
             (
                 coherence_score * 0.25
@@ -498,6 +538,7 @@ class EndToEndValidator:
         issues.extend(generic_analysis["findings"])
         issues.extend(language_analysis["reasons"])
         issues.extend(narrative_style["findings"])
+        issues.extend(engagement["findings"])
         issues.extend(specificity["findings"])
         issues.extend(hook["findings"])
         issues.extend(curiosity["findings"])
@@ -520,6 +561,14 @@ class EndToEndValidator:
             "storytelling_score": round(storytelling["score"], 1),
             "narrative_naturalness_score": narrative_style["narrative_naturalness_score"],
             "disclaimer_leakage_score": narrative_style["disclaimer_leakage_score"],
+            "engagement_score": engagement["engagement_score"],
+            "engagement_prompt": engagement["engagement_prompt"],
+            "engagement_prompt_type": engagement["engagement_prompt_type"],
+            "engagement_prompt_count": engagement["engagement_prompt_count"],
+            "engagement_prompt_near_end": engagement["engagement_prompt_near_end"],
+            "engagement_prompt_variants": engagement["engagement_prompt_variants"],
+            "comments_oriented_cta": engagement["comments_oriented"],
+            "manipulative_engagement_hits": engagement["manipulative_engagement_hits"],
             "coherence_score": round(coherence_score, 1),
             "factuality_risk_score": round(factuality["score"], 1),
             "generic_language_penalty": round(generic_analysis["penalty"], 1),
@@ -553,6 +602,7 @@ class EndToEndValidator:
                 "curiosity": curiosity,
                 "storytelling": storytelling,
                 "narrative_style": narrative_style,
+                "engagement": engagement,
                 "coherence": {"score": round(coherence_score, 1), "findings": []},
                 "factuality_risk": factuality,
                 "generic_language": generic_analysis,
@@ -1321,6 +1371,12 @@ class EndToEndValidator:
             "storytelling_score": quality_analysis.get("storytelling_score"),
             "narrative_naturalness_score": quality_analysis.get("narrative_naturalness_score"),
             "disclaimer_leakage_score": quality_analysis.get("disclaimer_leakage_score"),
+            "engagement_score": quality_analysis.get("engagement_score"),
+            "engagement_prompt": quality_analysis.get("engagement_prompt"),
+            "engagement_prompt_type": quality_analysis.get("engagement_prompt_type"),
+            "engagement_prompt_variants": quality_analysis.get("engagement_prompt_variants"),
+            "comments_oriented_cta": quality_analysis.get("comments_oriented_cta"),
+            "engagement_prompt_performance": self.pipeline.db.engagement_prompt_performance(),
             "retention_score": quality_analysis.get("retention_score"),
             "visual_interest_score": quality_analysis.get("visual_interest_score"),
             "safety_score": content_decision.get("safety_score", content_decision["quality_score"]),
@@ -1455,6 +1511,34 @@ class EndToEndValidator:
             artifacts[artifact_key] = str(target)
         return artifacts
 
+    def _write_engagement_performance_report(self) -> dict[str, str]:
+        payload = {
+            "generated_at": utc_now_iso(),
+            "metric_focus": "comments_oriented_cta",
+            "performance": self.pipeline.db.engagement_prompt_performance(),
+            "metric_availability": {
+                "views": True,
+                "likes": True,
+                "comments": True,
+                "shares": False,
+                "watch_time": False,
+            },
+        }
+        reports_dir = resolve_storage_path(
+            self.config,
+            self.config.get("storage", {}).get("reports_dir", "reports"),
+        )
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        reports_path = reports_dir / "engagement_prompt_performance_report.json"
+        artifact_path = self.artifact_dir / "engagement_prompt_performance_report.json"
+        serialized = json.dumps(payload, indent=2, ensure_ascii=True, default=str)
+        reports_path.write_text(serialized, encoding="utf-8")
+        artifact_path.write_text(serialized, encoding="utf-8")
+        return {
+            "engagement_prompt_performance_report_json": str(artifact_path),
+            "global_engagement_prompt_performance_report_json": str(reports_path),
+        }
+
     def _needs_research_report(
         self,
         selected: TrendTopic,
@@ -1491,6 +1575,7 @@ class EndToEndValidator:
             "queue_id": queue_id,
             "queue_status": QueueStatus.NEEDS_RESEARCH,
             "quality_score": 0.0,
+            "engagement_score": 0.0,
             "safety_score": None,
             "upload_simulation_result": None,
             "warnings": [*self.warnings, reason, *research.uncertainty_notes],
@@ -1500,6 +1585,7 @@ class EndToEndValidator:
                 "hook_score": 0.0,
                 "curiosity_score": 0.0,
                 "storytelling_score": 0.0,
+                "engagement_score": 0.0,
                 "retention_score": 0.0,
                 "visual_interest_score": 0.0,
                 "coherence_score": 0.0,
@@ -1566,6 +1652,7 @@ class EndToEndValidator:
             "queue_id": queue_id,
             "queue_status": QueueStatus.NEEDS_FRESH_SOURCE,
             "quality_score": 0.0,
+            "engagement_score": 0.0,
             "safety_score": None,
             "upload_simulation_result": None,
             "warnings": [*self.warnings, reason, *research.freshness_notes],
@@ -1575,6 +1662,7 @@ class EndToEndValidator:
                 "hook_score": 0.0,
                 "curiosity_score": 0.0,
                 "storytelling_score": 0.0,
+                "engagement_score": 0.0,
                 "retention_score": 0.0,
                 "visual_interest_score": 0.0,
                 "coherence_score": 0.0,
@@ -1641,6 +1729,7 @@ class EndToEndValidator:
             "queue_id": queue_id,
             "queue_status": QueueStatus.NEEDS_TRUSTED_SOURCE,
             "quality_score": 0.0,
+            "engagement_score": 0.0,
             "safety_score": None,
             "upload_simulation_result": None,
             "warnings": [*self.warnings, reason, *research.trust_notes],
@@ -1650,6 +1739,7 @@ class EndToEndValidator:
                 "hook_score": 0.0,
                 "curiosity_score": 0.0,
                 "storytelling_score": 0.0,
+                "engagement_score": 0.0,
                 "retention_score": 0.0,
                 "visual_interest_score": 0.0,
                 "coherence_score": 0.0,
@@ -1701,6 +1791,10 @@ class EndToEndValidator:
             "hook_score",
             "curiosity_score",
             "storytelling_score",
+            "engagement_score",
+            "engagement_prompt",
+            "engagement_prompt_type",
+            "comments_oriented_cta",
             "voice_profile",
             "voice_name",
             "voice_provider",

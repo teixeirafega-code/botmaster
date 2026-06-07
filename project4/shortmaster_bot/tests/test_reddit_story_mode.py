@@ -6,6 +6,7 @@ from app.generators.script import ScriptGenerator
 from app.generators.video import VideoAssembler
 from app.models import ContentScript, TrendTopic
 from app.services.database import ShortsMasterDatabase
+from app.services.engagement import EngagementPromptOptimizer, analyze_engagement_prompt
 from app.services.narrative_style import analyze_reddit_narrative_style
 from app.services.reddit_story import RedditStoryService
 from app.services.safety import SafetyGuard
@@ -147,7 +148,7 @@ def story_script(verbatim: bool = False, disclaimer: bool = False, report_like: 
         {"caption": "Cobertores escondidos", "image_prompt": "vídeo satisfatório acompanhando objetos escondidos"},
         {"caption": "Morando ali embaixo", "image_prompt": "vídeo satisfatório acompanhando descoberta final"},
     ]
-    return ContentScript(
+    script = ContentScript(
         title="O barulho no porão não vinha dos canos",
         hook="Pessoal do Reddit: qual barulho em casa fez você congelar?",
         narration=narration,
@@ -156,6 +157,112 @@ def story_script(verbatim: bool = False, disclaimer: bool = False, report_like: 
         description="Um barulho tratado como defeito da casa termina com uma descoberta assustadora.",
         niche="reddit_story",
     )
+    topic = TrendTopic(
+        source="reddit_story",
+        title="Relato do Reddit em r/LetsNotMeet: pista no porão",
+        score=100,
+        niche="reddit_story",
+        raw={
+            "content_mode": "reddit_story",
+            "story_source": {"priority_labels": ["scary"]},
+        },
+    )
+    return EngagementPromptOptimizer({}).apply(script, topic)
+
+
+def test_story_engagement_optimizer_generates_three_and_selects_one(tmp_path: Path) -> None:
+    service = RedditStoryService(story_config(tmp_path))
+    candidate = service._candidate_from_post(
+        {
+            "id": "eng123",
+            "title": "A creepy thing happened in my basement",
+            "selftext": source_text(),
+            "ups": 4500,
+            "num_comments": 620,
+            "upvote_ratio": 0.94,
+            "created_utc": 1_800_000_000,
+            "permalink": "/r/LetsNotMeet/comments/eng123/test/",
+        },
+        "LetsNotMeet",
+    )
+    assert candidate is not None
+    topic = service.topic_from_candidate(candidate)
+    script = ScriptGenerator(story_config(tmp_path)).generate(
+        topic,
+        service.build_research_brief(topic),
+    )
+    engagement = analyze_engagement_prompt(script)
+
+    assert len(script.engagement_prompt_variants) == 3
+    assert script.engagement_prompt == max(
+        script.engagement_prompt_variants,
+        key=lambda item: item["score"],
+    )["text"]
+    assert engagement["engagement_prompt_count"] == 1
+    assert engagement["engagement_prompt_near_end"] is True
+    assert engagement["engagement_score"] >= 75
+    assert engagement["comments_oriented"] is True
+    assert engagement["manipulative_engagement_hits"] == []
+
+
+def test_story_safety_blocks_manipulative_engagement_bait(tmp_path: Path) -> None:
+    config = story_config(tmp_path)
+    db = ShortsMasterDatabase(tmp_path / "bot.db")
+    topic = TrendTopic(
+        source="reddit_story",
+        title="Relato do Reddit em r/LetsNotMeet: pista no porão",
+        score=100,
+        niche="reddit_story",
+        raw={"content_mode": "reddit_story", "source_text_for_similarity": source_text()},
+    )
+    script = story_script()
+    script.narration = script.narration.replace(
+        script.engagement_prompt,
+        "E se você que tá assistindo ama sua mãe, deixa o like?",
+    )
+    script.engagement_prompt = "E se você que tá assistindo ama sua mãe, deixa o like?"
+
+    guard = SafetyGuard(db, config)
+    decision = guard.evaluate_content(1, topic, script)
+    checklist = guard.pre_upload_checklist(
+        real_upload_enabled=False,
+        queue_id=1,
+        topic=topic,
+        script=script,
+        video_path=None,
+        queue_item={},
+    )
+    engagement_upload_check = next(
+        check
+        for check in checklist["checks"]
+        if check["name"] == "reddit_engagement_prompt_policy"
+    )
+
+    assert decision["allowed"] is False
+    assert "emotional_blackmail" in decision["checks"]["manipulative_engagement_hits"]
+    assert engagement_upload_check["passed"] is False
+
+
+def test_story_safety_blocks_multiple_engagement_prompts(tmp_path: Path) -> None:
+    config = story_config(tmp_path)
+    db = ShortsMasterDatabase(tmp_path / "bot.db")
+    topic = TrendTopic(
+        source="reddit_story",
+        title="Relato do Reddit em r/LetsNotMeet: pista no porão",
+        score=100,
+        niche="reddit_story",
+        raw={"content_mode": "reddit_story", "source_text_for_similarity": source_text()},
+    )
+    script = story_script()
+    script.narration = script.narration.replace(
+        script.engagement_prompt,
+        "Pra você, qual detalhe foi mais estranho? " + script.engagement_prompt,
+    )
+
+    decision = SafetyGuard(db, config).evaluate_content(1, topic, script)
+
+    assert decision["allowed"] is False
+    assert decision["checks"]["engagement_prompt_count"] == 2
 
 
 def test_story_safety_blocks_verbatim_reddit_source_overlap(tmp_path: Path) -> None:

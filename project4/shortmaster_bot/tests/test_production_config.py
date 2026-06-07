@@ -43,3 +43,15 @@ def test_production_upload_thresholds_cannot_be_lowered(tmp_path, monkeypatch) -
 
     with pytest.raises(ConfigError, match="cannot be lower than 75"):
         load_config(tmp_path)
+
+
+def test_production_uploads_must_remain_private(tmp_path, monkeypatch) -> None:
+    write_config(tmp_path)
+    monkeypatch.setenv("PAPER_MODE", "false")
+    monkeypatch.setenv("SHORTSMASTER_ENV", "production")
+    monkeypatch.setenv("ENABLE_REAL_UPLOAD", "true")
+    monkeypatch.setenv("LIVE_UPLOAD_ENABLED", "true")
+    monkeypatch.setenv("YOUTUBE_PRIVACY_STATUS", "public")
+
+    with pytest.raises(ConfigError, match="must use YOUTUBE_PRIVACY_STATUS=private"):
+        load_config(tmp_path)

@@ -73,7 +73,7 @@ Run one cycle:
 
 ## Retention Design
 
-Generated Shorts use a retention-first structure: hook, curiosity, escalation, reveal, and fast ending. Reddit Story Shorts mode rewrites eligible high-engagement Reddit posts or top comments into original story scripts, keeps the source URL in `story_source_report.json`, and burns center-screen Shorts-style subtitles over a royalty-free procedural background randomly selected from approved retention categories. Non-story mode keeps relevant generated visuals as the primary asset, limits on-screen text, and creates visual motion/cuts at least every two seconds with `MAX_VISUAL_BEAT_SECONDS=2.0`.
+Generated Shorts use a retention-first structure: hook, curiosity, escalation, reveal, and fast ending. Reddit Story Shorts mode rewrites eligible high-engagement Reddit posts or top comments into original story scripts, keeps the source URL in `story_source_report.json`, and burns center-screen Shorts-style subtitles over a royalty-free procedural background randomly selected from approved retention categories. It also generates three story-connected engagement prompts, scores them for comment and retention potential, and appends exactly one winner as the final narration sentence. Emotional blackmail, fake percentage challenges, intelligence bait, and bad-luck threats are blocked. CTA performance is grouped by prompt and type in `engagement_prompt_performance_report.json` as YouTube comments, likes, and views become available. Non-story mode keeps relevant generated visuals as the primary asset, limits on-screen text, and creates visual motion/cuts at least every two seconds with `MAX_VISUAL_BEAT_SECONDS=2.0`.
 
 Run continuously:
 
@@ -123,26 +123,28 @@ Keep real upload disabled until you have reviewed generated videos and configure
 
 Run `python -m app.main youtube-auth-check` to open the local OAuth consent flow and store `secrets/youtube_token.json` without uploading anything.
 
-## Automated YouTube Publishing
+## Scheduled YouTube Publishing
 
-The upload scheduler is built for 5 private uploads per day and spreads slots across the day. It only performs a real upload when all live gates pass: `PAPER_MODE=false`, `ENABLE_REAL_UPLOAD=true`, `LIVE_UPLOAD_ENABLED=true`, configured channel, valid OAuth token, per-video `approved_for_live_upload=true`, quality score >= 75, safety score >= 90, trust/freshness gates, duplicate checks, quota availability, and daily limit availability.
+ShortMaster does not require a 24/7 worker. `.github/workflows/shortmaster-scheduled.yml` runs five ephemeral GitHub Actions jobs per day at 08:00, 11:30, 15:00, 18:30, and 22:00 in `America/Sao_Paulo`. Each run restores the SQLite state cache, generates at most one video, uploads at most one video, writes logs and reports, saves state, and exits.
 
-Generated scheduler reports are written to `reports/youtube_scheduler_report.json` and `reports/youtube_scheduler_report.html`.
+Scheduled runs enable real upload only in production and force `YOUTUBE_PRIVACY_STATUS=private`. Every upload still requires `approved_for_live_upload=true`, quality score >= 75, safety score >= 90, verified background commercial rights, pt-BR validation, trust/freshness gates, duplicate checks, quota availability, and the daily limit.
 
-## Render Worker
+Configure these GitHub Actions secrets:
 
-ShortMaster includes Render background worker configuration in `render.yaml` and in the repository root Blueprint. The worker start command is:
+- `YOUTUBE_CHANNEL_ID`
+- `YOUTUBE_CLIENT_SECRET_JSON`
+- `YOUTUBE_TOKEN_JSON`
+- `YOUTUBE_CHANNEL_NAME` (optional)
+- `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` (optional)
+- `BOTMASTER_STATUS_TOKEN` (optional)
+
+Run one bounded job locally with:
 
 ```powershell
-python -m app.main run
+python -m app.main scheduled-job --job-id local-test
 ```
 
-Use a persistent Render disk for SQLite state, generated videos, reports, and logs. The default Render mount is `/var/data`, with `SHORTSMASTER_STORAGE_DIR=/var/data/shortmaster`.
-The approved background manifest and bundled licensed assets remain read-only under `/app/background_library` inside the Docker image.
-
-Do not commit YouTube secrets. On Render, provide `YOUTUBE_CLIENT_SECRET_JSON` and `YOUTUBE_TOKEN_JSON` as secret environment variables and keep `YOUTUBE_OAUTH_MODE=disabled`.
-
-Full deployment steps are in `docs/render_deployment_checklist.md`.
+Manual workflow runs default to paper mode. Real manual upload must be explicitly selected in the workflow input. Logs and reports are retained as GitHub Actions artifacts for 30 days. Operational details are in `docs/github_actions_scheduled_jobs.md`.
 
 ## Docker
 
