@@ -40,6 +40,12 @@ def main() -> None:
     scheduler = scheduler_status(config, publisher_scheduler, cloud, root_manifest)
     backgrounds = background_status(config, pipeline, cloud)
     production = production_status(root_manifest, cloud)
+    deployment_control = {
+        "render_cli_authenticated": env_bool("SHORTSMASTER_RENDER_CLI_AUTHENTICATED"),
+        "worker_creation_attempted": env_bool("SHORTSMASTER_WORKER_CREATION_ATTEMPTED"),
+        "worker_creation_error": os.getenv("SHORTSMASTER_WORKER_CREATION_ERROR", ""),
+        "render_workspace_id": os.getenv("SHORTSMASTER_RENDER_WORKSPACE_ID", ""),
+    }
 
     slots = publisher_scheduler.upload_slots()
     next_times = next_publish_times(now_local, slots, 10)
@@ -77,6 +83,7 @@ def main() -> None:
         backgrounds=backgrounds,
         root_manifest=root_manifest,
         production=production,
+        deployment_control=deployment_control,
     )
     checks = {
         "scheduler_active": scheduler["scheduler_active"],
@@ -98,6 +105,7 @@ def main() -> None:
         "scheduler": scheduler,
         "cloud_worker": cloud,
         "deployment_source": git,
+        "deployment_control": deployment_control,
         "automatic_generation": {
             "active": scheduler["automatic_generation_active"],
             "trend_cycle_interval_minutes": int(config.get("scheduler", {}).get("trend_interval_minutes", 30)),
@@ -271,16 +279,19 @@ def git_status() -> dict[str, Any]:
         git_output(["ls-tree", "-r", "--name-only", "HEAD", "--", "project4/shortmaster_bot"]).strip()
     )
     root_render_diff = git_output(["diff", "--name-only", "--", "render.yaml"]).strip()
+    deployable = tracked_shortmaster and not bool(root_render_diff)
     return {
         "branch": git_output(["branch", "--show-current"]).strip(),
         "head_commit": git_output(["rev-parse", "HEAD"]).strip(),
         "head_commit_date": git_output(["show", "-s", "--format=%cI", "HEAD"]).strip(),
         "shortmaster_code_tracked_in_head": tracked_shortmaster,
         "root_render_worker_change_committed": not bool(root_render_diff),
-        "auto_deploy_can_receive_current_shortmaster_code": tracked_shortmaster and not bool(root_render_diff),
+        "auto_deploy_can_receive_current_shortmaster_code": deployable,
         "finding": (
-            "ShortMaster code is not tracked in the current HEAD and the root Render worker manifest change "
-            "is uncommitted, so Git-based Render auto-deploy cannot receive the current implementation."
+            "ShortMaster code and the Render worker manifest are committed in the current HEAD."
+            if deployable
+            else "ShortMaster code is not tracked in the current HEAD or the root Render worker manifest "
+            "has uncommitted changes, so Git-based Render auto-deploy cannot receive the current implementation."
         ),
     }
 
@@ -412,6 +423,7 @@ def build_blockers(
     backgrounds: dict[str, Any],
     root_manifest: dict[str, Any],
     production: dict[str, Any],
+    deployment_control: dict[str, Any],
 ) -> list[dict[str, str]]:
     blockers: list[dict[str, str]] = []
 
@@ -422,6 +434,12 @@ def build_blockers(
         add("SCHEDULER_INACTIVE", "critical", "No active local process or cloud worker heartbeat was found.")
     if not cloud["worker_active_confirmed"]:
         add("CLOUD_WORKER_NOT_CONFIRMED", "critical", cloud["reason"])
+    if deployment_control["worker_creation_error"]:
+        add(
+            "RENDER_WORKER_CREATION_BLOCKED",
+            "critical",
+            "Render worker creation failed: " + deployment_control["worker_creation_error"],
+        )
     if not git["auto_deploy_can_receive_current_shortmaster_code"]:
         add("CURRENT_CODE_NOT_DEPLOYABLE", "critical", git["finding"])
     if not scheduler["automatic_generation_active"]:
@@ -541,6 +559,10 @@ def load_yaml(path: Path) -> dict[str, Any]:
         return {}
     payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     return payload if isinstance(payload, dict) else {}
+
+
+def env_bool(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def git_output(args: list[str]) -> str:
