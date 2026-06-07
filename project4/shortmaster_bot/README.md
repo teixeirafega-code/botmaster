@@ -138,6 +138,7 @@ python -m app.main run
 ```
 
 Use a persistent Render disk for SQLite state, generated videos, reports, and logs. The default Render mount is `/var/data`, with `SHORTSMASTER_STORAGE_DIR=/var/data/shortmaster`.
+The approved background manifest and bundled licensed assets remain read-only under `/app/background_library` inside the Docker image.
 
 Do not commit YouTube secrets. On Render, provide `YOUTUBE_CLIENT_SECRET_JSON` and `YOUTUBE_TOKEN_JSON` as secret environment variables and keep `YOUTUBE_OAUTH_MODE=disabled`.
 
