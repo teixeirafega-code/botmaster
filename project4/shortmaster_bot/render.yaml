@@ -47,9 +47,9 @@ services:
       - key: REDDIT_STORY_BACKGROUND_MODE
         value: custom_background_library
       - key: BACKGROUND_LIBRARY_DIR
-        value: background_library
+        value: /app/background_library
       - key: BACKGROUND_LIBRARY_MANIFEST
-        value: background_library_manifest.json
+        value: /app/background_library_manifest.json
       - key: TIKTOK_MONITOR_ENABLED
         value: "false"
       - key: OLLAMA_SCRIPT_ENABLED
