@@ -1,0 +1,289 @@
+app:
+  name: ShortsMaster Bot
+  timezone: America/Sao_Paulo
+  paper_mode: true
+  log_level: INFO
+  database_path: data/shortsmaster.db
+
+scheduler:
+  trend_interval_minutes: 30
+  metrics_interval_minutes: 120
+  heartbeat_interval_minutes: 5
+  upload_slots_per_day: 5
+  upload_window_start_hour: 8
+  upload_window_end_hour: 22
+  max_consecutive_upload_failures: 3
+  max_upload_attempts_per_video: 3
+  validation_failure_window: 10
+  validation_failure_min_events: 5
+  max_validation_failure_rate: 0.5
+
+queue:
+  manual_approval: false
+  max_pending: 25
+  auto_process_approved: true
+  auto_approve_live_upload: false
+
+storage:
+  base_dir: ""
+  videos_dir: videos
+  reports_dir: reports
+  logs_dir: logs
+
+language:
+  default: pt-BR
+  required: pt-BR
+  block_english_output: true
+
+trends:
+  max_workers: 3
+  reddit:
+    enabled: true
+    user_agent: ShortsMasterBot/1.0 by automated creator
+    limit_per_subreddit: 12
+    subreddits:
+      - technology
+      - futurology
+      - science
+      - todayilearned
+      - explainlikeimfive
+      - gaming
+      - movies
+      - sports
+      - personalfinance
+  google_trends:
+    enabled: true
+    country: united_states
+    hl: en-US
+    tz: 360
+    limit: 25
+  tiktok:
+    enabled: false
+    provider: disabled
+    country_code: US
+    period_days: 7
+    limit: 20
+    seed_hashtags:
+      - ai
+      - tech
+      - science
+      - moneytok
+      - gaming
+      - sports
+      - movieclips
+      - didyouknow
+
+story_mode:
+  enabled: true
+  user_agent: ShortsMasterBot/1.0 reddit story shorts mode
+  subreddits:
+    - AskReddit
+    - TodayILearned
+    - LetsNotMeet
+    - NoStupidQuestions
+    - LifeProTips
+    - TIFU
+    - InterestingAsFuck
+  sort: top
+  time_filter: week
+  limit_per_subreddit: 25
+  min_upvotes: 2500
+  min_comments: 120
+  min_comment_score: 250
+  min_story_chars: 450
+  min_story_words: 90
+  use_top_comments: true
+  requires_fresh_source: true
+  freshness_window_hours: 168
+  freshness_min_score: 70
+  trust_min_score: 70
+  background_video:
+    mode: custom_background_library
+    royalty_free_only: true
+    loop: true
+    subtitles: always
+    library_dir: background_library
+    manifest_path: background_library_manifest.json
+    loop_seconds: 8
+    subtitle_words_per_chunk: 7
+    approved_categories:
+      tier_1:
+        - pressure_washing
+        - deep_cleaning
+        - restoration
+      tier_2:
+        - slime
+        - kinetic_sand
+        - soap_cutting
+
+selection:
+  default_niche: general
+  source_weights:
+    reddit: 1.0
+    google_trends: 1.15
+    tiktok: 1.1
+  niches:
+    technology:
+      - ai
+      - artificial intelligence
+      - robot
+      - app
+      - software
+      - iphone
+      - android
+      - startup
+      - tesla
+      - openai
+    finance:
+      - stock
+      - market
+      - crypto
+      - bitcoin
+      - money
+      - inflation
+      - mortgage
+      - credit
+      - investing
+    sports:
+      - nba
+      - nfl
+      - soccer
+      - football
+      - ufc
+      - olympics
+      - tennis
+      - goal
+      - playoffs
+    entertainment:
+      - movie
+      - netflix
+      - celebrity
+      - music
+      - trailer
+      - album
+      - disney
+      - marvel
+    gaming:
+      - game
+      - gaming
+      - xbox
+      - playstation
+      - nintendo
+      - fortnite
+      - minecraft
+    science:
+      - nasa
+      - space
+      - science
+      - climate
+      - health
+      - study
+      - research
+
+generation:
+  script:
+    provider_order:
+      - ollama
+      - template
+    target_seconds: 60
+    retention_scene_count: 10
+    max_tokens: 1200
+    temperature: 0.7
+    ollama:
+      enabled: true
+      base_url: http://localhost:11434
+      model: llama3.1:8b
+      timeout_seconds: 6
+  voice:
+    provider: edge_tts
+    default_profile: male_storyteller
+    allow_gtts_fallback: true
+    lang: pt
+    tld: com.br
+    slow: false
+  images:
+    width: 1080
+    height: 1920
+    model: flux
+    offline_fallback: true
+    style: vertical 9:16 cinematic editorial, vivid but realistic, professional lighting
+  video:
+    width: 1080
+    height: 1920
+    fps: 30
+    target_seconds: 60
+    max_visual_beat_seconds: 2.0
+    preset: medium
+    threads: 2
+
+research:
+  wikipedia_enabled: true
+  timeout_seconds: 12
+  current_topic_freshness_enabled: true
+  freshness_window_hours: 72
+  freshness_min_score: 70
+  trust_min_score: 70
+
+publishing:
+  live_upload_enabled: false
+  enable_real_upload: false
+  daily_upload_limit: 5
+  max_daily_upload_limit: 5
+  min_upload_quality_score: 75
+  min_upload_safety_score: 90
+  youtube_daily_quota_units: 10000
+  youtube_upload_quota_units: 1600
+  channel_id: "UC5zWjQwJb5IWsTHVAgu0Pgw"
+  channel_name: "espankshort"
+  youtube_client_secrets_file: secrets/youtube_client_secret.json
+  youtube_token_file: secrets/youtube_token.json
+  youtube_client_secret_json_env: YOUTUBE_CLIENT_SECRET_JSON
+  youtube_token_json_env: YOUTUBE_TOKEN_JSON
+  oauth_mode: local_server
+  privacy_status: private
+  category_id: "22"
+  made_for_kids: false
+
+monitoring:
+  telegram:
+    enabled: false
+    bot_token: ""
+    chat_id: ""
+    timeout_seconds: 10
+
+safety:
+  min_quality_score: 70
+  min_script_words: 105
+  max_script_words: 190
+  min_scene_count: 8
+  min_hook_score: 70
+  min_retention_score: 72
+  min_visual_interest_score: 70
+  min_narrative_naturalness_score: 75
+  source_copy_ngram_words: 8
+  script_similarity_block_threshold: 0.92
+  spam_terms:
+    - click here
+    - free followers
+    - guaranteed income
+    - get rich quick
+    - make money fast
+    - miracle cure
+    - shocking secret
+    - you won't believe
+    - 100% guaranteed
+  copyright_terms:
+    - copyrighted clip
+    - official clip
+    - movie footage
+    - music video
+    - song lyrics
+    - use the lyrics
+    - trailer footage
+    - ripped from
+  performance_guard:
+    enabled: true
+    min_recent_videos: 3
+    recent_video_window: 5
+    min_avg_views: 50
+    min_avg_like_rate: 0.01

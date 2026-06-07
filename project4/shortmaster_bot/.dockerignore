@@ -1,0 +1,13 @@
+.env
+.git
+.pytest_cache
+.pytest_tmp
+__pycache__
+*.pyc
+data
+logs
+reports
+secrets
+videos
+background_library/*.mp4
+!background_library/shortmaster-original-pressure-washing-v1.mp4
