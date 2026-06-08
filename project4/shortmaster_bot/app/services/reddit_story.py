@@ -803,6 +803,174 @@ class RedditStoryService:
                     "parente desconhecido, chave de cofre e revelacao emocional. Localizar naturalmente para o publico brasileiro."
                 ),
             },
+            {
+                "id": "gas-station-note-004",
+                "title": "O bilhete preso na bomba de gasolina",
+                "priority_labels": ["mystery", "unbelievable"],
+                "source_text": (
+                    "Semente narrativa original: parada tarde da noite num posto vazio, bilhete preso na bomba com o nome do narrador, "
+                    "funcionario nervoso fingindo nao ver, carro igual seguindo pela avenida e uma placa que revela que alguem sabia o destino. "
+                    "Reescrever em portugues brasileiro com suspense crescente."
+                ),
+            },
+            {
+                "id": "elevator-floor-005",
+                "title": "O andar que nao existia no elevador",
+                "priority_labels": ["scary", "mystery"],
+                "source_text": (
+                    "Semente narrativa original: predio antigo, elevador para num andar sem botao, corredor escuro com portas numeradas errado, "
+                    "uma crianca pergunta se o narrador tambem recebeu o convite e o painel muda sozinho. Reescrever do zero em tom de relato."
+                ),
+            },
+            {
+                "id": "delivery-wrong-house-006",
+                "title": "A entrega que chegou na casa errada",
+                "priority_labels": ["shocking_discovery", "mystery"],
+                "source_text": (
+                    "Semente narrativa original: entregador deixa pacote por engano, etiqueta tem endereco impossivel, dentro ha objetos do proprio narrador, "
+                    "vizinha reconhece uma foto antiga e o remetente aparece como uma casa demolida. Criar uma narracao natural e curiosa."
+                ),
+            },
+            {
+                "id": "hotel-room-call-007",
+                "title": "A ligacao que veio do quarto vazio",
+                "priority_labels": ["scary", "unbelievable"],
+                "source_text": (
+                    "Semente narrativa original: recepcionista de hotel no turno da madrugada recebe ligacao de um quarto bloqueado, "
+                    "a voz pede para nao abrir a porta, o sistema registra entrada sem hospede e a camera mostra alguem parado no corredor. "
+                    "Transformar em relato pt-BR com final forte."
+                ),
+            },
+            {
+                "id": "bus-last-stop-008",
+                "title": "O passageiro que ficou ate o ponto final",
+                "priority_labels": ["mystery", "scary"],
+                "source_text": (
+                    "Semente narrativa original: motorista de onibus termina a ultima rota, um passageiro permanece sentado sem se mover, "
+                    "o bilhete indica uma linha que acabou anos antes e no banco fica uma foto tirada dentro do proprio onibus. "
+                    "Reescrever como historia curta de suspense."
+                ),
+            },
+            {
+                "id": "locker-school-009",
+                "title": "O armario da escola que abriu sozinho",
+                "priority_labels": ["mystery", "life_changing"],
+                "source_text": (
+                    "Semente narrativa original: ex-aluno visita escola fechada, armario antigo abre com uma combinacao que ele nunca contou, "
+                    "dentro ha carta com previsao de uma decisao importante e uma assinatura que muda o sentido da memoria. "
+                    "Localizar para publico brasileiro."
+                ),
+            },
+            {
+                "id": "neighbor-window-010",
+                "title": "A janela do vizinho que piscava toda noite",
+                "priority_labels": ["scary", "mystery"],
+                "source_text": (
+                    "Semente narrativa original: morador percebe luz piscando sempre no mesmo horario, acha que e pedido de ajuda, "
+                    "descobre que o apartamento esta vazio ha meses e recebe uma mensagem descrevendo sua propria janela. "
+                    "Criar roteiro natural com escalada e revelacao."
+                ),
+            },
+            {
+                "id": "wedding-camera-011",
+                "title": "A camera que gravou alguem que nao estava no casamento",
+                "priority_labels": ["shocking_discovery", "unbelievable"],
+                "source_text": (
+                    "Semente narrativa original: familia revisa video de casamento, uma pessoa desconhecida aparece em todas as cenas importantes, "
+                    "ninguem lembra dela, a filmagem mostra um envelope sendo deixado e o conteudo muda uma decisao familiar. "
+                    "Reescrever para Shorts em pt-BR."
+                ),
+            },
+            {
+                "id": "market-receipt-012",
+                "title": "O recibo do mercado com uma compra impossivel",
+                "priority_labels": ["funny_disaster", "mystery"],
+                "source_text": (
+                    "Semente narrativa original: pessoa confere recibo depois de uma compra comum, aparece item absurdo que ela nunca pegou, "
+                    "seguranca chama pelo nome errado, a situacao vira confusao publica e o item revela uma surpresa no caixa. "
+                    "Contar com humor e curiosidade."
+                ),
+            },
+            {
+                "id": "clinic-folder-013",
+                "title": "A pasta da clinica com meu nome completo",
+                "priority_labels": ["shocking_discovery", "life_changing"],
+                "source_text": (
+                    "Semente narrativa original: acompanhante espera numa clinica, encontra pasta com seu nome completo, exames que nunca fez, "
+                    "uma data futura marcada em destaque e uma conversa no corredor que muda sua relacao com a familia. "
+                    "Reescrever de forma emocional sem afirmar fatos reais."
+                ),
+            },
+            {
+                "id": "parking-ticket-014",
+                "title": "O ticket do estacionamento que marcava o dia seguinte",
+                "priority_labels": ["mystery", "unbelievable"],
+                "source_text": (
+                    "Semente narrativa original: pessoa perde o carro no shopping, ticket mostra horario do dia seguinte, cancela reconhece a placa, "
+                    "seguranca encontra imagem do carro entrando antes do narrador chegar e um objeto fica no banco. "
+                    "Narrar em primeira pessoa com suspense."
+                ),
+            },
+            {
+                "id": "old-phone-015",
+                "title": "O celular antigo que ligou sem bateria",
+                "priority_labels": ["scary", "life_changing"],
+                "source_text": (
+                    "Semente narrativa original: caixa de mudanca guarda celular antigo sem bateria, aparelho toca durante a madrugada, "
+                    "a chamada tem audio de uma discussao esquecida e revela uma frase que so uma pessoa da familia conhecia. "
+                    "Adaptar como historia brasileira de impacto."
+                ),
+            },
+            {
+                "id": "bakery-order-016",
+                "title": "A encomenda da padaria que ninguem fez",
+                "priority_labels": ["funny_disaster", "shocking_discovery"],
+                "source_text": (
+                    "Semente narrativa original: padaria liga cobrando uma encomenda gigante, familia acha que e golpe, bolo chega com mensagem estranha, "
+                    "a entrega provoca confusao no predio e acaba revelando segredo antigo de um morador. "
+                    "Misturar humor, surpresa e final memoravel."
+                ),
+            },
+            {
+                "id": "train-seat-017",
+                "title": "O assento reservado por alguem com meu nome",
+                "priority_labels": ["mystery", "unbelievable"],
+                "source_text": (
+                    "Semente narrativa original: viagem de trem ou metro, assento aparece reservado com nome do narrador, funcionario insiste que ja foi pago, "
+                    "um passageiro entrega envelope sem explicar e o conteudo aponta para um encontro que nao deveria acontecer. "
+                    "Reescrever em tom casual de relato."
+                ),
+            },
+            {
+                "id": "camera-doorbell-018",
+                "title": "A campainha gravou uma visita que eu nao recebi",
+                "priority_labels": ["scary", "mystery"],
+                "source_text": (
+                    "Semente narrativa original: camera da campainha envia alerta de madrugada, video mostra alguem deixando objeto na porta, "
+                    "mas o objeto ja estava dentro de casa, e o reflexo no vidro mostra o narrador olhando antes de acordar. "
+                    "Construir suspense com frases curtas."
+                ),
+            },
+            {
+                "id": "auction-box-019",
+                "title": "A caixa de leilao que tinha fotos da minha rua",
+                "priority_labels": ["shocking_discovery", "mystery"],
+                "source_text": (
+                    "Semente narrativa original: compra barata em leilao online, caixa chega com objetos comuns e fotos recentes da rua do narrador, "
+                    "uma anotacao indica horarios da rotina e a ultima foto mostra a propria porta aberta. "
+                    "Transformar em historia de retencao para Shorts."
+                ),
+            },
+            {
+                "id": "restaurant-table-020",
+                "title": "A mesa reservada para uma pessoa que nao existia",
+                "priority_labels": ["mystery", "life_changing"],
+                "source_text": (
+                    "Semente narrativa original: restaurante confirma reserva em nome de alguem desconhecido, mesa tem duas cadeiras e uma carta, "
+                    "garcom reconhece uma data de familia e o encontro inexistente muda a forma como o narrador entende uma perda. "
+                    "Narrar com emocao contida e final claro."
+                ),
+            },
         ]
         return seeds
 

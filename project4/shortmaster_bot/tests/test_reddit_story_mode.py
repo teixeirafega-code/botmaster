@@ -9,6 +9,7 @@ from app.models import ContentScript, TrendTopic
 from app.services.database import ShortsMasterDatabase
 from app.services.engagement import EngagementPromptOptimizer, analyze_engagement_prompt
 from app.services.narrative_style import analyze_reddit_narrative_style
+from app.services.pipeline import ShortsMasterPipeline
 from app.services.reddit_story import RedditStoryService
 from app.services.safety import SafetyGuard
 from app.services.validation import EndToEndValidator
@@ -260,10 +261,31 @@ def test_original_fallback_provides_multiple_pt_br_seeds(tmp_path: Path, monkeyp
 
     candidates = service.fetch_candidates()
 
-    assert len(candidates) >= 3
+    assert len(candidates) >= 20
     assert len({candidate.post_id for candidate in candidates}) == len(candidates)
     assert all(candidate.source_kind == "original_story_seed" for candidate in candidates)
     assert all("story seed" not in candidate.title.lower() for candidate in candidates)
+
+
+def test_original_fallback_selects_unseen_story_after_initial_pool_is_seen(tmp_path: Path, monkeypatch) -> None:
+    config = story_config(tmp_path)
+    pipeline = ShortsMasterPipeline(config)
+    monkeypatch.setattr(pipeline.story_sources, "_fetch_subreddit_posts", lambda _subreddit: [])
+    initial_seed_ids = {
+        "night-shift-mall-001",
+        "wrong-apartment-key-002",
+        "family-photo-box-003",
+    }
+
+    for candidate in pipeline.story_sources.fetch_candidates():
+        if candidate.post_id in initial_seed_ids:
+            pipeline.db.mark_seen(pipeline.story_sources.topic_from_candidate(candidate), selected=True)
+
+    topic = pipeline._select_next_topic()
+
+    assert topic is not None
+    assert topic.raw["story_source"]["source_kind"] == "original_story_seed"
+    assert topic.raw["story_source"]["post_id"] not in initial_seed_ids
 
 
 def test_original_fallback_generates_public_pt_br_script(tmp_path: Path, monkeypatch) -> None:
