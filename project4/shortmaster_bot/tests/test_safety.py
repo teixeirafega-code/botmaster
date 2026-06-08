@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
-from app.models import ContentScript, QueueStatus, TrendTopic
+from app.models import ContentScript, QueueStatus, ResearchBrief, TrendTopic
 from app.publisher.youtube import YouTubePublisher
 from app.services.database import ShortsMasterDatabase
 from app.services.safety import SafetyGuard
@@ -208,6 +209,97 @@ def test_pre_upload_quota_blocks_when_units_exhausted(tmp_path: Path) -> None:
 
     assert decision["allowed"] is False
     assert any("youtube_quota_available" in reason for reason in decision["reasons"])
+
+
+def test_performance_guard_warns_but_allows_bootstrap_channel_with_low_views(tmp_path: Path) -> None:
+    config = make_test_config(tmp_path)
+    config["root_dir"] = str(tmp_path)
+    config["app"]["paper_mode"] = False
+    config["publishing"]["enable_real_upload"] = True
+    config["publishing"]["live_upload_enabled"] = True
+    config["publishing"]["channel_id"] = "UC-test"
+    secrets = tmp_path / "secrets" / "client.json"
+    token = tmp_path / "secrets" / "token.json"
+    secrets.parent.mkdir(parents=True)
+    secrets.write_text("{}", encoding="utf-8")
+    token.write_text("{}", encoding="utf-8")
+    db = ShortsMasterDatabase(tmp_path / "bot.db")
+    for index in range(3):
+        published_topic = TrendTopic(
+            source="reddit_story",
+            title=f"Video inicial {index}",
+            score=100,
+            niche="reddit_story",
+        )
+        published = db.enqueue_topic(published_topic, QueueStatus.READY)
+        db.mark_published(int(published["id"]), f"video-inicial-{index}", paper_mode=False)
+        db.record_metrics(
+            int(published["id"]),
+            f"video-inicial-{index}",
+            "reddit_story",
+            views=1,
+            likes=0,
+            comments=0,
+        )
+
+    topic = TrendTopic(source="google_trends", title="Ferramentas de IA em alta", score=100, niche="technology")
+    script = make_script()
+    item = db.enqueue_topic(topic, QueueStatus.READY)
+    video = tmp_path / "video.mp4"
+    video.write_bytes(b"not uploaded")
+    research = ResearchBrief(
+        topic=topic.title,
+        category=topic.niche,
+        why_now="Tema evergreen para teste de upload.",
+        concrete_facts=[
+            "Uma ferramenta remove etapas repetitivas.",
+            "Criadores comparam tempo e qualidade.",
+            "Fluxos consistentes aumentam confianca.",
+        ],
+        source_urls=["https://example.com/source"],
+        source_summaries=[
+            {
+                "source": "Example",
+                "title": topic.title,
+                "summary": "Fonte de teste com fatos suficientes.",
+                "url": "https://example.com/source",
+                "source_trust_score": 90.0,
+            }
+        ],
+        trust_score=90.0,
+        trust_threshold=70.0,
+        freshness_score=100.0,
+        freshness_threshold=70.0,
+        requires_fresh_source=False,
+        requires_trusted_source=False,
+    )
+    db.update_queue_item(
+        int(item["id"]),
+        script_json=json.dumps(script.to_dict(), ensure_ascii=True, sort_keys=True),
+        research_json=json.dumps(research.to_dict(), ensure_ascii=True, sort_keys=True),
+        video_path=str(video),
+        quality_score=85.0,
+        safety_json=json.dumps({"quality_score": 85.0, "safety_score": 95.0}, ensure_ascii=True),
+        background_filename="verified-background.mp4",
+        background_commercial_rights_verified=1,
+    )
+    item = db.approve_for_live_upload(int(item["id"]))
+
+    decision = SafetyGuard(db, config).evaluate_upload(
+        real_upload_enabled=True,
+        queue_id=int(item["id"]),
+        topic=topic,
+        script=script,
+        video_path=video,
+        queue_item=item,
+    )
+
+    assert decision["allowed"] is True
+    assert decision["reasons"] == []
+    assert any("performance guard in bootstrap mode" in warning for warning in decision["warnings"])
+    performance_check = next(check for check in decision["checklist"]["checks"] if check["name"] == "performance_guard_passed")
+    assert performance_check["passed"] is True
+    assert "bootstrap" in performance_check["detail"]
 
 
 def test_publisher_simulates_when_real_upload_disabled(tmp_path: Path) -> None:

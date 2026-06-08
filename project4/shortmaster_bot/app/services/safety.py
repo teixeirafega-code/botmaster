@@ -1059,7 +1059,21 @@ class SafetyGuard:
             return {"allowed": True, "reasons": [], "warnings": []}
 
         min_recent = int(guard.get("min_recent_videos", 3))
+        min_published_for_blocking = int(
+            guard.get("min_published_videos_for_blocking", max(10, min_recent))
+        )
+        published_count = len(self.db.list_published(limit=min_published_for_blocking))
         recent = self.db.recent_real_video_metrics(limit=int(guard.get("recent_video_window", 5)))
+        if published_count < min_published_for_blocking:
+            return {
+                "allowed": True,
+                "reasons": [],
+                "warnings": [
+                    "performance guard in bootstrap mode: "
+                    f"{published_count}/{min_published_for_blocking} published videos; "
+                    "recent performance is monitored but does not block upload yet"
+                ],
+            }
         if len(recent) < min_recent:
             return {
                 "allowed": True,
