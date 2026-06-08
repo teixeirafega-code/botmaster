@@ -464,8 +464,8 @@ def load_config(root_dir: Path | None = None) -> dict[str, Any]:
             raise ConfigError("Production min_upload_quality_score cannot be lower than 75")
         if int(config["publishing"]["min_upload_safety_score"]) < 90:
             raise ConfigError("Production min_upload_safety_score cannot be lower than 90")
-        if str(config["publishing"].get("privacy_status", "")).lower() != "private":
-            raise ConfigError("Production uploads must use YOUTUBE_PRIVACY_STATUS=private")
+        if str(config["publishing"].get("privacy_status", "")).lower() not in {"private", "public"}:
+            raise ConfigError("Production uploads must use YOUTUBE_PRIVACY_STATUS=private or public")
 
     config.setdefault("safety", {})
     config["safety"]["min_scene_count"] = _env_int(

@@ -250,7 +250,7 @@ publishing:
   youtube_client_secret_json_env: YOUTUBE_CLIENT_SECRET_JSON
   youtube_token_json_env: YOUTUBE_TOKEN_JSON
   oauth_mode: local_server
-  privacy_status: private
+  privacy_status: public
   category_id: "22"
   made_for_kids: false
 
