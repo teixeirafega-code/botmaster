@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
 from app.generators.script import ScriptGenerator
 from app.generators.video import VideoAssembler
-from app.models import ContentScript, TrendTopic
+from app.models import ContentScript, QueueStatus, TrendTopic
 from app.services.database import ShortsMasterDatabase
 from app.services.engagement import EngagementPromptOptimizer, analyze_engagement_prompt
 from app.services.narrative_style import analyze_reddit_narrative_style
@@ -286,6 +287,47 @@ def test_original_fallback_selects_unseen_story_after_initial_pool_is_seen(tmp_p
     assert topic is not None
     assert topic.raw["story_source"]["source_kind"] == "original_story_seed"
     assert topic.raw["story_source"]["post_id"] not in initial_seed_ids
+
+
+def test_original_fallback_different_seeds_generate_distinct_scripts(tmp_path: Path, monkeypatch) -> None:
+    config = story_config(tmp_path)
+    service = RedditStoryService(config)
+    generator = ScriptGenerator(config)
+    db = ShortsMasterDatabase(tmp_path / "bot.db")
+    guard = SafetyGuard(db, config)
+    monkeypatch.setattr(service, "_fetch_subreddit_posts", lambda _subreddit: [])
+    target_ids = [
+        "restaurant-table-020",
+        "gas-station-note-004",
+        "elevator-floor-005",
+    ]
+    candidates = {
+        candidate.post_id: candidate
+        for candidate in service.fetch_candidates()
+        if candidate.post_id in target_ids
+    }
+    scripts = []
+
+    for post_id in target_ids:
+        candidate = candidates[post_id]
+        topic = service.topic_from_candidate(candidate)
+        script = generator.generate(topic, service.build_research_brief(topic))
+        item = db.enqueue_topic(topic, QueueStatus.READY)
+        db.update_queue_item(
+            int(item["id"]),
+            script_json=json.dumps(script.to_dict(), ensure_ascii=True, sort_keys=True),
+        )
+        decision = guard.evaluate_content(int(item["id"]), topic, script)
+
+        assert script.title == candidate.title
+        assert script.title != "A estrada que desapareceu do mapa"
+        assert decision["allowed"] is True, decision["reasons"]
+        assert decision["quality_score"] >= 75
+        assert decision["safety_score"] >= 90
+        scripts.append(script)
+
+    assert len({script.title for script in scripts}) == 3
+    assert len({script.narration for script in scripts}) == 3
 
 
 def test_original_fallback_generates_public_pt_br_script(tmp_path: Path, monkeypatch) -> None:

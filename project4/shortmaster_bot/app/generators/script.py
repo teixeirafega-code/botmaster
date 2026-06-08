@@ -388,7 +388,10 @@ class ScriptGenerator:
         subreddit = clean_text(str(story_source.get("source_subreddit", "Reddit")))
         category = labels[0] if labels else "mystery"
         source_text = clean_text(str(raw.get("source_text_for_similarity", "")))
-        profile = self._story_profile(source_text, category)
+        if story_source.get("source_kind") == "original_story_seed":
+            profile = self._story_profile_from_original_seed(story_source, source_text, category)
+        else:
+            profile = self._story_profile(source_text, category)
         hook = profile["prompt"]
         narration = " ".join([hook, *profile["sentences"]])
         scenes = self._story_scenes(profile["captions"], profile["visual_theme"])
@@ -404,6 +407,104 @@ class ScriptGenerator:
             )[:900],
             niche="reddit_story",
         )
+
+    def _story_profile_from_original_seed(
+        self,
+        story_source: dict[str, Any],
+        source_text: str,
+        category: str,
+    ) -> dict[str, Any]:
+        title = clean_text(str(story_source.get("source_title", ""))) or "A historia que ninguem explicou"
+        seed_details = self._original_seed_details(source_text)
+        while len(seed_details) < 8:
+            seed_details.append("um detalhe estranho apareceu antes do final")
+        public_details = [self._public_seed_detail(detail) for detail in seed_details]
+
+        subject = self._seed_subject(title)
+        prompt = f"Pessoal do Reddit: qual historia estranha envolvendo {subject} voce nunca explicaria?"
+        first_detail, second_detail, third_detail = public_details[:3]
+        fourth_detail, fifth_detail, sixth_detail = public_details[3:6]
+        seventh_detail, eighth_detail = public_details[6:8]
+        sentences = [
+            f"Eu achei que {subject} seria so mais uma coisa comum do dia.",
+            f"Mas tudo comecou com {first_detail}.",
+            f"Na hora, tentei agir normal.",
+            f"Depois veio {second_detail}.",
+            f"Foi ai que eu percebi {third_detail}.",
+            "Meu corpo inteiro travou por alguns segundos.",
+            f"Mesmo assim, eu continuei olhando e notei {fourth_detail}.",
+            f"Quando tentei pedir ajuda, apareceu {fifth_detail}.",
+            f"A parte que mais me assustou foi {sixth_detail}.",
+            "Eu pensei em ir embora sem falar com ninguem.",
+            f"So que antes de sair, reparei em {seventh_detail}.",
+            f"E o ultimo detalhe era {eighth_detail}.",
+            "Foi nesse momento que tudo deixou de parecer coincidencia.",
+            f"Eu nunca mais consegui pensar em {subject} do mesmo jeito.",
+        ]
+        captions = [
+            title,
+            self._caption_from_seed_detail(first_detail),
+            self._caption_from_seed_detail(second_detail),
+            self._caption_from_seed_detail(third_detail),
+            self._caption_from_seed_detail(fourth_detail),
+            self._caption_from_seed_detail(fifth_detail),
+            self._caption_from_seed_detail(sixth_detail),
+            self._caption_from_seed_detail(seventh_detail),
+            self._caption_from_seed_detail(eighth_detail),
+            "Nada era coincidencia",
+        ]
+        visual_theme = f"relato de suspense sobre {subject}, com {first_detail}"
+        return {
+            "title": title,
+            "prompt": prompt,
+            "sentences": sentences,
+            "captions": captions,
+            "visual_theme": visual_theme,
+            "description": f"Uma historia sobre {subject} que fica mais estranha a cada detalhe.",
+        }
+
+    def _original_seed_details(self, source_text: str) -> list[str]:
+        text = clean_text(source_text)
+        text = re.sub(r"^Semente narrativa original:\s*", "", text, flags=re.IGNORECASE)
+        text = re.split(
+            r"\b(?:Reescrever|Criar|Transformar|Narrar|Contar|Adaptar|Misturar|Construir|Localizar)\b",
+            text,
+            maxsplit=1,
+            flags=re.IGNORECASE,
+        )[0]
+        fragments = [
+            clean_text(part).strip(" .,:;")
+            for part in re.split(r",|\s+e\s+", text)
+        ]
+        return [
+            fragment.lower()
+            for fragment in fragments
+            if len(fragment.split()) >= 3
+            and "semente narrativa original" not in fragment.lower()
+        ]
+
+    def _public_seed_detail(self, detail: str) -> str:
+        stopwords = {
+            "a", "o", "as", "os", "um", "uma", "uns", "umas", "de", "do", "da", "dos", "das",
+            "em", "no", "na", "nos", "nas", "com", "para", "por", "que", "e", "ou",
+        }
+        words = [
+            word
+            for word in re.findall(r"[A-Za-z0-9]+", clean_text(detail).lower())
+            if word not in stopwords
+        ]
+        if not words:
+            return "um sinal estranho"
+        return " ".join(words[:5])
+
+    def _seed_subject(self, title: str) -> str:
+        subject = clean_text(title).strip(" .")
+        subject = re.sub(r"^(o|a|os|as)\s+", "", subject, flags=re.IGNORECASE)
+        return subject[:70].lower() or "essa historia"
+
+    def _caption_from_seed_detail(self, detail: str) -> str:
+        words = clean_text(detail).split()
+        return " ".join(words[:5]).capitalize() if words else "Detalhe estranho"
 
     def _story_profile(self, source_text: str, category: str) -> dict[str, Any]:
         lower = source_text.lower()
