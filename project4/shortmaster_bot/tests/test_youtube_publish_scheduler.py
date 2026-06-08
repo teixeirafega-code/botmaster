@@ -229,6 +229,82 @@ def test_scheduler_pauses_after_three_upload_failures(tmp_path: Path) -> None:
     assert "consecutive upload failures" in service.pause_reason()
 
 
+def test_scheduler_auto_resumes_upload_failure_pause_and_retries_ready_candidate(tmp_path: Path) -> None:
+    config = live_config(tmp_path)
+    pipeline = ShortsMasterPipeline(config)
+    item = ready_item(
+        pipeline,
+        tmp_path,
+        "Historia de reenvio",
+        title="A chave que apareceu de novo na mesa",
+    )
+    queue_id = int(item["id"])
+    pipeline.db.update_queue_item(
+        queue_id,
+        upload_attempt_count=3,
+        last_upload_error="old OAuth failure",
+        upload_blocked_reason="old OAuth failure",
+        error="old OAuth failure",
+    )
+    service = YouTubePublishScheduler(pipeline, config)
+    service.pause("stopped after 3 consecutive upload failures")
+    uploaded: list[int] = []
+
+    def fake_publish(_video_path, _script, queue_item):
+        uploaded.append(int(queue_item["id"]))
+        return "retried-private-video"
+
+    pipeline.publisher.publish = fake_publish
+
+    result = service.publish_next_ready()
+
+    assert result["status"] == "success"
+    assert result["uploaded"] is True
+    assert result["queue_id"] == queue_id
+    assert result["auto_resume"]["resumed"] is True
+    assert result["auto_resume"]["upload_retry_reset"]["queue_ids"] == [queue_id]
+    assert uploaded == [queue_id]
+    updated = pipeline.db.get_queue_item(queue_id)
+    assert updated is not None
+    assert updated["upload_attempt_count"] == 1
+    assert updated["youtube_video_id"] == "retried-private-video"
+    assert service.is_paused() is False
+
+
+def test_scheduler_does_not_auto_resume_validation_pause(tmp_path: Path) -> None:
+    config = live_config(tmp_path)
+    pipeline = ShortsMasterPipeline(config)
+    ready_item(pipeline, tmp_path, "Paused validation story", title="Paused validation upload")
+    service = YouTubePublishScheduler(pipeline, config)
+    service.pause("stopped because validation failure rate is too high: 5/6")
+    pipeline.publisher.publish = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+        AssertionError("must not upload while paused for validation")
+    )
+
+    result = service.publish_next_ready()
+
+    assert result["status"] == "paused"
+    assert result["auto_resume"]["resumed"] is False
+    assert "not an upload-failure retry pause" in result["auto_resume"]["reason"]
+    assert service.is_paused() is True
+
+
+def test_scheduler_resume_resets_consecutive_upload_failure_count(tmp_path: Path) -> None:
+    config = live_config(tmp_path)
+    pipeline = ShortsMasterPipeline(config)
+    service = YouTubePublishScheduler(pipeline, config)
+    pipeline.db.record_scheduler_event("upload", "failure", reason="first")
+    pipeline.db.record_scheduler_event("upload", "failure", reason="second")
+
+    assert pipeline.db.consecutive_upload_failures() == 2
+
+    result = service.resume(reason="credentials fixed")
+
+    assert result["status"] == "resumed"
+    assert pipeline.db.consecutive_upload_failures() == 0
+    assert service.is_paused() is False
+
+
 def live_config(tmp_path: Path) -> dict:
     config = make_test_config(tmp_path)
     config["root_dir"] = str(tmp_path)

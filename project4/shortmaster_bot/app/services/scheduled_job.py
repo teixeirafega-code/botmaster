@@ -40,6 +40,7 @@ class ScheduledPublishingJob:
             "uploaded_count": 0,
             "generation_result": None,
             "upload_result": None,
+            "scheduler_resume_result": None,
             "metrics_refresh": {"attempted": False, "updated": 0, "error": ""},
             "paper_mode": bool(self.config.get("app", {}).get("paper_mode", True)),
             "real_upload_enabled": bool(self.pipeline.publisher.real_upload_enabled),
@@ -60,6 +61,7 @@ class ScheduledPublishingJob:
 
         try:
             self.pipeline.background_library.resume_publishing_if_library_available()
+            report["scheduler_resume_result"] = self.publisher.auto_resume_if_retryable_upload_pause()
             ready = self.pipeline.db.next_upload_candidate(
                 max_attempts=int(
                     self.config.get("scheduler", {}).get(

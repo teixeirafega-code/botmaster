@@ -923,6 +923,8 @@ class ShortsMasterDatabase:
         events = self.scheduler_events(limit=20)
         count = 0
         for event in events:
+            if event["event_type"] == "scheduler" and event["status"] == "resumed":
+                break
             if event["event_type"] != "upload":
                 continue
             if event["status"] == "success":

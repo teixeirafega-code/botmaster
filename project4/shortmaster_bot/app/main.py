@@ -65,6 +65,16 @@ def build_parser() -> argparse.ArgumentParser:
     checklist_parser.add_argument("--queue-id", type=int)
 
     sub.add_parser("youtube-scheduler-report", help="Generate YouTube scheduler dashboard report without publishing")
+    resume_parser = sub.add_parser(
+        "youtube-scheduler-resume",
+        help="Clear paused YouTube scheduler state and upload retry counters",
+    )
+    resume_parser.add_argument("--reason", default="manual resume")
+    resume_parser.add_argument(
+        "--keep-upload-attempts",
+        action="store_true",
+        help="Resume without clearing retry counters on READY/APPROVED upload candidates",
+    )
     sub.add_parser("background-library-report", help="Scan approved custom backgrounds and write JSON/HTML reports")
 
     sub.add_parser("youtube-auth-check", help="Validate YouTube OAuth and detect channel without uploading")
@@ -131,6 +141,14 @@ def main() -> None:
         report = service.build_report()
         paths = service.write_report(report)
         print_json({"paths": paths, **report})
+    elif args.command == "youtube-scheduler-resume":
+        service = YouTubePublishScheduler(pipeline, config)
+        print_json(
+            service.resume(
+                reason=args.reason,
+                clear_upload_attempts=not args.keep_upload_attempts,
+            )
+        )
     elif args.command == "background-library-report":
         print_json(pipeline.background_library.write_report())
     elif args.command == "youtube-auth-check":

@@ -20,6 +20,12 @@ LOGGER = logging.getLogger(__name__)
 
 
 class YouTubePublishScheduler:
+    RETRYABLE_UPLOAD_PAUSE_MARKERS = (
+        "consecutive upload failures",
+        "consecutive upload failure",
+        "upload failures",
+    )
+
     def __init__(self, pipeline: ShortsMasterPipeline, config: dict[str, Any]):
         self.pipeline = pipeline
         self.config = config
@@ -30,11 +36,19 @@ class YouTubePublishScheduler:
         self.timezone = ZoneInfo(config.get("app", {}).get("timezone", "UTC"))
 
     def publish_next_ready(self) -> dict[str, Any]:
+        auto_resume_result: dict[str, Any] | None = None
         if self.is_paused():
-            result = {"status": "paused", "reason": self.pause_reason(), "uploaded": False}
-            LOGGER.warning("YouTube upload scheduler is paused: %s", result["reason"])
-            self.write_report(self.build_report(last_result=result))
-            return result
+            auto_resume_result = self.auto_resume_if_retryable_upload_pause()
+            if not auto_resume_result.get("resumed"):
+                result = {
+                    "status": "paused",
+                    "reason": self.pause_reason(),
+                    "uploaded": False,
+                    "auto_resume": auto_resume_result,
+                }
+                LOGGER.warning("YouTube upload scheduler is paused: %s", result["reason"])
+                self.write_report(self.build_report(last_result=result))
+                return result
 
         max_attempts = int(self.scheduler_config.get("max_upload_attempts_per_video", 3))
         item = self.db.next_upload_candidate(max_attempts=max_attempts)
@@ -44,6 +58,7 @@ class YouTubePublishScheduler:
             self.db.record_scheduler_event("queue", "empty", reason=reason)
             self.alerts.send("queue empty", reason)
             result = {"status": "empty", "reason": reason, "uploaded": False}
+            self._attach_auto_resume(result, auto_resume_result)
             self.write_report(self.build_report(last_result=result))
             return result
 
@@ -68,11 +83,19 @@ class YouTubePublishScheduler:
                     "reason": reason,
                     "uploaded": False,
                 }
+                self._attach_auto_resume(result, auto_resume_result)
                 self.write_report(self.build_report(last_result=result))
                 return result
             if item.get("status") != QueueStatus.READY:
                 reason = f"queue item #{queue_id} is not upload-ready after generation; status={item.get('status')}"
-                return self._skip(queue_id, "validation", "validation_failed", reason, item)
+                return self._skip(
+                    queue_id,
+                    "validation",
+                    "validation_failed",
+                    reason,
+                    item,
+                    auto_resume=auto_resume_result,
+                )
 
         topic = self.pipeline._topic_from_queue_item(item)
         script = ContentScript.from_dict(json.loads(item["script_json"]))
@@ -88,11 +111,11 @@ class YouTubePublishScheduler:
         )
         if not self.pipeline.publisher.real_upload_enabled:
             reason = "real upload disabled; PAPER_MODE, ENABLE_REAL_UPLOAD, and LIVE_UPLOAD_ENABLED must explicitly allow live upload"
-            return self._skip(queue_id, "upload_gate", "skipped", reason, item, gate)
+            return self._skip(queue_id, "upload_gate", "skipped", reason, item, gate, auto_resume_result)
         if not gate["allowed"]:
             reason = "; ".join(gate.get("reasons") or gate.get("checklist", {}).get("real_upload_blockers", []))
             event_status = "validation_failed" if self._is_validation_gate_failure(reason) else "skipped"
-            result = self._skip(queue_id, "upload_gate", event_status, reason, item, gate)
+            result = self._skip(queue_id, "upload_gate", event_status, reason, item, gate, auto_resume_result)
             if "youtube_quota_available" in reason:
                 self.alerts.send("quota limit reached", reason)
             if event_status == "validation_failed":
@@ -117,6 +140,7 @@ class YouTubePublishScheduler:
             self.alerts.send("upload failure", reason)
             self._pause_if_consecutive_upload_failures()
             result = {"status": "failure", "queue_id": queue_id, "reason": reason, "uploaded": False, "attempt": attempts}
+            self._attach_auto_resume(result, auto_resume_result)
             self.write_report(self.build_report(last_result=result))
             return result
 
@@ -135,6 +159,7 @@ class YouTubePublishScheduler:
             comments=0,
         )
         result = {"status": "success", "queue_id": queue_id, "youtube_video_id": youtube_id, "uploaded": True}
+        self._attach_auto_resume(result, auto_resume_result)
         self.db.record_scheduler_event("upload", "success", queue_id=queue_id, payload=result)
         self.alerts.send("upload success", f"Uploaded queue #{queue_id}: {script.title}\nVideo ID: {youtube_id}")
         self.write_report(self.build_report(last_result=result))
@@ -229,9 +254,130 @@ class YouTubePublishScheduler:
         self.alerts.send("scheduler paused/stopped", reason)
         LOGGER.error("YouTube upload scheduler paused: %s", reason)
 
-    def resume(self) -> None:
-        self.db.set_scheduler_state("youtube_upload_scheduler", {"paused": False, "reason": ""})
-        self.db.record_scheduler_event("scheduler", "resumed", reason="manual resume")
+    def resume(self, reason: str = "manual resume", clear_upload_attempts: bool = True) -> dict[str, Any]:
+        retry_reset = (
+            self.reset_upload_retry_state_for_ready_candidates(reason)
+            if clear_upload_attempts
+            else {"cleared_count": 0, "queue_ids": []}
+        )
+        self.db.set_scheduler_state(
+            "youtube_upload_scheduler",
+            {
+                "paused": False,
+                "reason": "",
+                "resumed_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+                "last_resume_reason": reason,
+            },
+        )
+        self.db.record_scheduler_event(
+            "scheduler",
+            "resumed",
+            reason=reason,
+            payload={"upload_retry_reset": retry_reset},
+        )
+        LOGGER.info(
+            "YouTube upload scheduler resumed: reason=%s cleared_upload_retry_items=%s",
+            reason,
+            retry_reset["cleared_count"],
+        )
+        return {
+            "status": "resumed",
+            "paused": False,
+            "reason": reason,
+            "upload_retry_reset": retry_reset,
+        }
+
+    def auto_resume_if_retryable_upload_pause(self) -> dict[str, Any]:
+        if not self.is_paused():
+            return {
+                "attempted": False,
+                "resumed": False,
+                "reason": "scheduler is not paused",
+            }
+
+        previous_reason = self.pause_reason()
+        if not self._is_retryable_upload_failure_pause(previous_reason):
+            return {
+                "attempted": False,
+                "resumed": False,
+                "reason": "pause reason is not an upload-failure retry pause",
+                "previous_pause_reason": previous_reason,
+            }
+        if not self.pipeline.publisher.real_upload_enabled:
+            return {
+                "attempted": True,
+                "resumed": False,
+                "reason": "real upload is not enabled, so retrying would only hit the upload guard",
+                "previous_pause_reason": previous_reason,
+            }
+
+        retry_reset = self.reset_upload_retry_state_for_ready_candidates(
+            "auto resume after credential/upload retry state changed"
+        )
+        max_attempts = int(self.scheduler_config.get("max_upload_attempts_per_video", 3))
+        candidate = self.db.next_upload_candidate(max_attempts=max_attempts)
+        if candidate is None:
+            return {
+                "attempted": True,
+                "resumed": False,
+                "reason": "No approved READY/APPROVED upload candidate is available after retry reset",
+                "previous_pause_reason": previous_reason,
+                "upload_retry_reset": retry_reset,
+            }
+
+        resume_result = self.resume(
+            reason="auto resume after consecutive upload failures; retrying READY queue item",
+            clear_upload_attempts=False,
+        )
+        LOGGER.info(
+            "scheduler_auto_resume=true queue_id=%s previous_pause_reason=%s",
+            candidate.get("id"),
+            previous_reason,
+        )
+        return {
+            "attempted": True,
+            "resumed": True,
+            "reason": "auto-resumed retryable upload failure pause",
+            "previous_pause_reason": previous_reason,
+            "queue_id": candidate.get("id"),
+            "upload_retry_reset": retry_reset,
+            "resume_result": resume_result,
+        }
+
+    def reset_upload_retry_state_for_ready_candidates(self, reason: str) -> dict[str, Any]:
+        cleared_ids: list[int] = []
+        for status in (QueueStatus.READY, QueueStatus.APPROVED):
+            for item in self.db.list_queue(status=status, limit=200):
+                if item.get("youtube_video_id"):
+                    continue
+                if int(item.get("approved_for_live_upload") or 0) != 1:
+                    continue
+                has_retry_state = bool(
+                    int(item.get("upload_attempt_count") or 0) > 0
+                    or item.get("last_upload_error")
+                    or item.get("upload_blocked_reason")
+                    or item.get("error")
+                )
+                if not has_retry_state:
+                    continue
+                queue_id = int(item["id"])
+                self.db.update_queue_item(
+                    queue_id,
+                    upload_attempt_count=0,
+                    last_upload_error=None,
+                    upload_blocked_reason=None,
+                    error=None,
+                )
+                cleared_ids.append(queue_id)
+
+        if cleared_ids:
+            self.db.record_scheduler_event(
+                "scheduler",
+                "retry_state_reset",
+                reason=reason,
+                payload={"queue_ids": cleared_ids},
+            )
+        return {"cleared_count": len(cleared_ids), "queue_ids": cleared_ids}
 
     def _skip(
         self,
@@ -241,6 +387,7 @@ class YouTubePublishScheduler:
         reason: str,
         item: dict[str, Any],
         payload: dict[str, Any] | None = None,
+        auto_resume: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         reason = clean_text(reason) or "scheduler skipped queue item"
         LOGGER.warning("YouTube scheduler skipped queue item #%s: %s", queue_id, reason)
@@ -253,6 +400,7 @@ class YouTubePublishScheduler:
             "reason": reason,
             "uploaded": False,
         }
+        self._attach_auto_resume(result, auto_resume)
         self.write_report(self.build_report(last_result=result))
         return result
 
@@ -268,6 +416,14 @@ class YouTubePublishScheduler:
             "background_commercial_rights_verified",
         ]
         return any(marker in reason for marker in validation_markers)
+
+    def _is_retryable_upload_failure_pause(self, reason: str) -> bool:
+        lower_reason = reason.lower()
+        return any(marker in lower_reason for marker in self.RETRYABLE_UPLOAD_PAUSE_MARKERS)
+
+    def _attach_auto_resume(self, result: dict[str, Any], auto_resume: dict[str, Any] | None) -> None:
+        if auto_resume:
+            result["auto_resume"] = auto_resume
 
     def _pause_if_consecutive_upload_failures(self) -> None:
         failures = self.db.consecutive_upload_failures()

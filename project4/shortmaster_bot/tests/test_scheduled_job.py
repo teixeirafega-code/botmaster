@@ -40,6 +40,45 @@ def test_scheduled_job_uploads_at_most_one_video_and_exits(tmp_path: Path) -> No
     assert (tmp_path / "reports" / "scheduled_job_test-run.json").exists()
 
 
+def test_scheduled_job_unpauses_retryable_upload_pause_and_uploads_existing_ready(tmp_path: Path) -> None:
+    config = live_config(tmp_path)
+    pipeline = ShortsMasterPipeline(config)
+    item = ready_item(
+        pipeline,
+        tmp_path,
+        "Historia pausada",
+        title="A porta que abriu de novo sozinha",
+    )
+    queue_id = int(item["id"])
+    pipeline.db.update_queue_item(
+        queue_id,
+        upload_attempt_count=3,
+        last_upload_error="old credential failure",
+        upload_blocked_reason="old credential failure",
+        error="old credential failure",
+    )
+    YouTubePublishScheduler(pipeline, config).pause("stopped after 3 consecutive upload failures")
+    uploaded: list[int] = []
+
+    def fake_publish(_video_path, _script, queue_item):
+        uploaded.append(int(queue_item["id"]))
+        return "scheduled-retry-private-video"
+
+    pipeline.publisher.publish = fake_publish
+    pipeline.refresh_metrics = lambda: 0
+
+    result = ScheduledPublishingJob(pipeline, config).run(job_id="retry-unpause-run")
+
+    assert result["status"] == "success"
+    assert result["generated_count"] == 0
+    assert result["uploaded_count"] == 1
+    assert result["scheduler_resume_result"]["resumed"] is True
+    assert result["scheduler_resume_result"]["upload_retry_reset"]["queue_ids"] == [queue_id]
+    assert result["workflow_stages"]["upload_attempted"]["passed"] is True
+    assert result["upload_result"]["youtube_video_id"] == "scheduled-retry-private-video"
+    assert uploaded == [queue_id]
+
+
 def test_scheduled_job_retries_generation_until_upload_ready_limit(tmp_path: Path, monkeypatch) -> None:
     config = live_config(tmp_path)
     config.setdefault("scheduler", {})["generation_attempt_limit"] = 3
